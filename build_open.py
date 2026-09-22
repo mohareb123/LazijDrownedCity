@@ -35,6 +35,72 @@ ret_items = [f'{alias}: {orig}' if alias != orig else orig for orig, alias in sp
 prelude = ('const THREE = (() => {\n' + three_clean + '\nreturn { ' +
            ', '.join(ret_items) + ' };\n})();\n')
 
+# ——— postprocessing (bloom) inliner ———
+import os as _os
+pp_code = ''
+_PP_FILES = ['postprocessing/Pass.js', 'postprocessing/MaskPass.js', 'shaders/CopyShader.js', 'shaders/LuminosityHighPassShader.js',
+             'postprocessing/ShaderPass.js', 'postprocessing/EffectComposer.js',
+             'postprocessing/RenderPass.js', 'postprocessing/UnrealBloomPass.js']
+if all(_os.path.exists('pp/' + f) for f in _PP_FILES):
+    _three_names, _parts = set(), []
+    for f in _PP_FILES:
+        t = open('pp/' + f, encoding='utf-8').read()
+        for m in re.finditer(r"import\s*\{([^}]*)\}\s*from\s*'three'\s*;?", t):
+            for n in m.group(1).split(','):
+                n = n.strip().split(' as ')[-1].strip()
+                if n:
+                    _three_names.add(n)
+        t = re.sub(r"import\s*\{[^}]*\}\s*from\s*'[^']*'\s*;?", '', t)
+        t = re.sub(r"import\s+[A-Za-z_$][\w$]*\s+from\s*'[^']*'\s*;?", '', t)
+        t = re.sub(r"export\s*\{[^}]*\}\s*;?", '', t)
+        t = re.sub(r"export\s+(?=(?:default\s+)?(?:class|const|let|var|function))", '', t)
+        _parts.append('// ——— ' + f + ' ———\n' + t)
+    _ret = 'EffectComposer, RenderPass, ShaderPass, UnrealBloomPass, CopyShader, Pass, FullScreenQuad, MaskPass, ClearMaskPass, LuminosityHighPassShader'
+    pp_code = ('const PP = (() => {\n' + 'const { ' + ', '.join(sorted(_three_names)) + ' } = THREE;\n'
+               + '\n'.join(_parts) + '\nreturn { ' + _ret + ' };\n})();\n')
+    print('postprocessing inlined:', len(pp_code), 'chars; three-names:', len(_three_names))
+else:
+    print('pp/ missing — building WITHOUT bloom')
+
+# ——— glTF loader + SkeletonUtils inliner (internet model imports) ———
+ext_code = ''
+_EXT_FILES = ['BufferGeometryUtils.js', 'SkeletonUtils.js', 'DRACOLoader.js', 'GLTFLoader.js']
+if all(_os.path.exists('ext/' + f) for f in _EXT_FILES):
+    _three_names_e, _parts_e, _exports = set(), [], []
+    for f in _EXT_FILES:
+        t = open('ext/' + f, encoding='utf-8').read()
+        for m in re.finditer(r"import\s*\{([^}]*)\}\s*from\s*'three'\s*;?", t):
+            for n in m.group(1).split(','):
+                n = n.strip().split(' as ')[-1].strip()
+                if n:
+                    _three_names_e.add(n)
+        for m in re.finditer(r"export\s*\{([^}]*)\}\s*;?", t):
+            for n in m.group(1).split(','):
+                n = n.strip().split(' as ')[-1].strip()
+                if n:
+                    _exports.append(n)
+        for m in re.finditer(r"export\s+(?:async\s+)?(?:class|function\*?|const|let|var)\s+([A-Za-z_$][\w$]*)", t):
+            _exports.append(m.group(1))
+        t = re.sub(r"import\s*\{[^}]*\}\s*from\s*'[^']*'\s*;?", '', t)
+        t = re.sub(r"import\s+[A-Za-z_$][\w$]*\s+from\s*'[^']*'\s*;?", '', t)
+        t = re.sub(r"export\s*\{[^}]*\}\s*;?", '', t)
+        t = re.sub(r"export\s+(?=(?:default\s+)?(?:class|const|let|var|function))", '', t)
+        _parts_e.append('// ——— ' + f + ' ———\n' + t)
+    _uniq = []
+    for n in _exports:
+        if n not in _uniq:
+            _uniq.append(n)
+    ext_code = ('const EXT = (() => {\n' + 'const { ' + ', '.join(sorted(_three_names_e)) + ' } = THREE;\n'
+                + '\n'.join(_parts_e)
+                + '\nreturn { ' + ', '.join(_uniq) + ', SkeletonUtils: { clone } };\n})();\n')
+    print('EXT inlined:', len(ext_code), 'chars; exports:', len(_uniq))
+else:
+    print('ext/ missing — no glTF loader (procedural fallbacks stay)')
+
+# Resolve local downloaded model paths.
+for _model in ['spider', 'robot', 'boss', 'tokyo']:
+    game = game.replace('__MODEL_' + _model.upper() + '__', 'models/' + _model + '.glb')
+
 # splice the creature rig in
 marker = '/*__RIG__*/'
 assert game.count(marker) == 1
@@ -88,7 +154,7 @@ button { font: inherit; border: 0; cursor: pointer; touch-action: manipulation; 
   background: rgba(16,22,38,.85); color: #eaf1ff; font-size: 24px; font-weight: 900;
   border: 2px solid rgba(140,170,255,.5); box-shadow: 0 6px 22px rgba(0,0,10,.5); }
 .ability:active { transform: scale(.94); }
-#jumpBtn { width: 72px; height: 72px; font-size: 27px; }
+#wJump { width: 72px; height: 72px; font-size: 27px; }
 #wPause { position: fixed; z-index: 6; top: max(14px, env(safe-area-inset-top)); right: 14px;
   width: 44px; height: 44px; border-radius: 14px; background: rgba(13,17,30,.85);
   color: #cfe0ff; font-size: 18px; font-weight: 900; border: 1px solid rgba(120,160,255,.3); }
@@ -106,6 +172,9 @@ h1 { margin: 8px 0 4px; font-size: clamp(26px, 7vw, 34px); letter-spacing: -1px;
   color: #0a0e1c; background: linear-gradient(180deg, #ffd75e, #ffb03a); box-shadow: 0 5px 0 #8a5a12; }
 .secondary { margin-top: 10px; width: 100%; border-radius: 16px; min-height: 44px;
   background: rgba(120,150,220,.14); color: #b9c6e2; font-weight: 800; }
+#skyFlash { position: fixed; inset: 0; z-index: 3; pointer-events: none; opacity: 0;
+  background: radial-gradient(ellipse at 50% 0%, rgba(215,228,255,.85), rgba(160,180,240,.25) 55%, transparent 75%);
+  mix-blend-mode: screen; transition: opacity .12s; }
 #wCombo { position: fixed; z-index: 5; top: 70px; left: 16px; padding: 7px 14px; border-radius: 14px;
   background: rgba(255,215,94,.92); color: #241a04; font-weight: 900; font-size: 16px; }
 ''@media (min-width: 900px) { #wToast { font-size: 15px; } }
@@ -152,6 +221,7 @@ h1 { margin: 8px 0 4px; font-size: clamp(26px, 7vw, 34px); letter-spacing: -1px;
     <div class="pill" id="wCombo"><small>كومبو</small><strong id="wComboText">×2</strong></div>
     <div class="pill"><small>حيوية</small><strong id="wHp">❤❤❤❤❤</strong></div>
     <div class="pill"><small>نقاط</small><strong id="wScore">0</strong></div>
+    <div class="pill" id="wSpeedPill"><small>السرعة</small><strong id="wSpeed">0</strong><small>كم/س</small></div>
   </div>
   <div class="pill"><span id="wArrow">▲</span><span id="wDist">0م</span><span id="wMission">اجمع قطع النول من الأسطح</span></div>
 </div>
@@ -160,13 +230,14 @@ h1 { margin: 8px 0 4px; font-size: clamp(26px, 7vw, 34px); letter-spacing: -1px;
 <div id="wToast"></div>
 <canvas id="minimap"></canvas>
 <div id="senseVignette"></div>
+<div id="skyFlash"></div>
 <div id="raceHud" class="hidden">🏁 <span id="raceTxt"></span></div>
 <div id="lockHint" class="hidden">🖱️ انقر لقفل الماوس والنظر حولك • ESC للإيقاف المؤقت</div>
 <div id="fpsBox" class="hidden">–</div>
 <div id="wActions">
   <button class="ability" id="wShoot" aria-label="إطلاق شبكة">🕸</button>
   <button class="ability" id="wWeb" aria-label="الشبكة — تأرجح">🕷</button>
-  <button class="ability" id="jumpBtn" aria-label="قفز">⤒</button>
+  <button class="ability" id="wJump" aria-label="قفز">⤒</button>
 </div>
 
 <div id="wOverlay">
@@ -241,15 +312,35 @@ h1 { margin: 8px 0 4px; font-size: clamp(26px, 7vw, 34px); letter-spacing: -1px;
 
 <script type="module">
 __PRELUDE__
+__PP_BLOOM__
 __SCRIPT__
 </script>
 </body>
 </html>
 '''
-html = html.replace('__PRELUDE__', prelude.rstrip('\n')).replace('__SCRIPT__', script)
+
+# ——— static arity guard: grid-lookup fns must always receive `city` first ———
+import re as _re
+_bad = []
+for _name in ('groundAt', 'collidePush', 'pickAnchor', 'swingConstraint'):
+    _decl = f'function {_name}(city'
+    for _m in _re.finditer(_name + r'\(', script):
+        _seg = script[max(0, _m.start() - 10):_m.start()]
+        if 'function ' in _seg:
+            continue
+        _args = script[_m.end():_m.end() + 40]
+        if _name != 'swingConstraint' and not _args.lstrip().startswith('city'):
+            _bad.append((_name, _args[:32]))
+if _bad:
+    raise SystemExit(f'ARITY GUARD FAILED: calls missing city: {_bad}')
+print('arity guard ✓')
+
+html = (html.replace('__PRELUDE__', prelude.rstrip('\n'))
+            .replace('__PP_BLOOM__', pp_code + ext_code)
+            .replace('__SCRIPT__', script))
 
 out = 'open-world.html'
 open(out, 'w', encoding='utf-8').write(html)
 print('wrote', out, len(html), 'chars')
-open('open_world_script.mjs', 'w', encoding='utf-8').write(prelude + script)
+open('open_world_script.mjs', 'w', encoding='utf-8').write(prelude + '\n' + pp_code + ext_code + '\n' + script)
 print('extracted script for checks:', len(prelude + script), 'chars')

@@ -1,0 +1,61 @@
+{
+  "spider": {
+    "skins": 6,
+    "skinned_nodes": 228,
+    "unique_joints": 54,
+    "animations": [
+      "BezierCurve.004Action",
+      "BezierCurve.005Action",
+      "BezierCurve.006Action",
+      "BezierCurve.007Action",
+      "BezierCurve.008Action",
+      "BezierCurve.009Action",
+      "bony controlAction",
+      "ArmatureAction",
+      "Armature.001Action",
+      "Armature.002Action",
+      "Armature.003Action",
+      "Armature.004Action",
+      "Armature.005Action"
+    ]
+  },
+  "robot": {
+    "skins": 2,
+    "skinned_nodes": 2,
+    "unique_joints": 43,
+    "animations": [
+      "Dance",
+      "Death",
+      "Idle",
+      "Jump",
+      "No",
+      "Punch",
+      "Running",
+      "Sitting",
+      "Standing",
+      "ThumbsUp",
+      "Walking",
+      "WalkJump",
+      "Wave",
+      "Yes"
+    ]
+  },
+  "boss": {
+    "skins": 1,
+    "skinned_nodes": 1,
+    "unique_joints": 24,
+    "animations": [
+      "Survey",
+      "Walk",
+      "Run"
+    ]
+  },
+  "tokyo": {
+    "skins": 1,
+    "skinned_nodes": 8,
+    "unique_joints": 32,
+    "animations": [
+      "Take 001"
+    ]
+  }
+}

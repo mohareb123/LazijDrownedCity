@@ -210,9 +210,15 @@ const STEP_LENGTH = 1.55;
 const LEG_DUTY = .56;
 const STEP_LIFT = .27;
 
+const limbBones = [];
+
 function makeLimb(spec) {
-  const root = new THREE.Group();   // femur: hip → knee
-  const mid = new THREE.Group();    // tibia: knee → needle tip
+  // Real bones: every segment is a THREE.Bone so the creature has a true skeleton.
+  const root = new THREE.Bone();    // femur: hip → knee
+  const mid = new THREE.Bone();     // tibia: knee → needle tip
+  root.name = "femur";
+  mid.name = "tibia";
+  limbBones.push(root, mid);
   creature.add(root, mid);
 
   root.add(hardShell(new THREE.OctahedronGeometry(spec.r0 * 1.45, 0)));
@@ -433,5 +439,14 @@ function updateCreature(dt) {
   carried.rotation.x = -.07 * activity;
 }
 
+
+// ——— real skeleton assembly: spine bone parents every limb bone ———
+const spineBone = new THREE.Bone();
+spineBone.name = "spine";
+creature.add(spineBone);
+for (const b of limbBones) spineBone.add(b);   // spine is at origin/identity — poses stay identical
+const creatureSkeleton = new THREE.Skeleton([spineBone, ...limbBones]);
+creature.userData.skeleton = creatureSkeleton;
+creature.userData.boneCount = creatureSkeleton.bones.length;
 
 resetCreature();

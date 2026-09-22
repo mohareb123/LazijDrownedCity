@@ -166,6 +166,8 @@ let state = "running";
 let speed = 0;
 let sideSpeed = 0;
 
+const scene = new THREE.Scene();
+
 /*__RIG__*/
 
 // ——————————————————— renderer & atmosphere ———————————————————
@@ -227,6 +229,20 @@ carried = new THREE.Group();
 creature.add(carried);
 
 const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, .1, 520);
+
+// ——— postprocessing: bloom (graceful — procedural world never depends on it) ———
+let composer = null, bloomPass = null, bloomOn = false;
+try {
+  composer = new PP.EffectComposer(renderer);
+  composer.addPass(new PP.RenderPass(scene, camera));
+  bloomPass = new PP.UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), .72, .62, .7);
+  composer.addPass(bloomPass);
+  bloomOn = true;
+} catch { composer = null; bloomOn = false; }
+function renderFrame() {
+  if (bloomOn && composer) composer.render();
+  else renderer.render(scene, camera);
+}
 
 // ——————————————————— city meshes ———————————————————
 const rand = makeRand(1973 + 83);
@@ -551,7 +567,13 @@ function updateEnemies(dt) {
     e.pos.y = groundAt(city, e.pos.x, e.pos.z);
     e.mesh.position.copy(e.pos);
     e.mesh.rotation.y = Math.atan2(-vx, -vz);
-    e.mesh.position.y += Math.abs(Math.sin(performance.now() * .009 + e.pos.x)) * .06;
+    if (e.mix) {
+      setRobotClip(e, e.aggro ? "Running" : "Walking");
+      e.mix.timeScale = clamp(.7 + Math.hypot(vx, vz) * .09, .7, 1.7);
+      e.mix.update(dt);
+    } else {
+      e.mesh.position.y += Math.abs(Math.sin(performance.now() * .009 + e.pos.x)) * .06;
+    }
     // contact
     if (dist < 1.25 && Math.abs(ddy) < 1.6 && invuln <= 0) {
       invuln = 1.8;
@@ -717,6 +739,7 @@ function summonBoss() {
   boss.hp = 3;
   renderBossPips();
   $("bossWrap").classList.remove("hidden");
+  attachFoxBoss();
 }
 function hitBoss() {
   sfxHit();
@@ -745,6 +768,13 @@ function hitBoss() {
 }
 function updateBoss(dt) {
   if (!boss.active || !boss.mesh) return;
+  if (boss.mix) {
+    const onRoof = player.pos.y > TOWER_H - 4;
+    setBossClip(boss.stun > 0 ? "Walk" : boss.phase === "wind" ? "Run" : onRoof ? "Run" : "Survey");
+    const ta = boss.acts && boss.acts[boss.bossClip];
+    if (ta) ta.timeScale = boss.bossClip === "Run" ? (boss.stun > 0 ? 1.4 : 1.05) : .5;
+    boss.mix.update(dt);
+  }
   const onRoof = player.pos.y > TOWER_H - 4;
   boss.mesh.position.y = boss.pos.y + Math.sin(performance.now() * .0012) * .12;
   boss.mesh.rotation.y = dampAngle(boss.mesh.rotation.y,
@@ -908,7 +938,7 @@ function updateCamera(dt) {
   fovNow = damp(fovNow, SET.fov + Math.min(22, hs * 1.2) + (player.onGround ? 0 : 6), 4, dt);
   camera.fov = fovNow;
   camera.updateProjectionMatrix();
-  const lift = clamp((player.pos.y - groundAt(player.pos.x, player.pos.z)) * .3, 0, 8);
+  const lift = clamp((player.pos.y - groundAt(city, player.pos.x, player.pos.z)) * .3, 0, 8);
   if (firstPerson) {
     camPos.set(player.pos.x, player.pos.y + 1.72, player.pos.z);
     camera.position.copy(camPos);
@@ -1194,6 +1224,8 @@ function loadAll() {
   if (mission === "boss") summonBoss();
   return true;
 }
+let importedSpider = null, spiderMixer = null;
+let robotTmpl = null, robotClips = {}, bossTmpl = null, bossClips = {}, skyline = null;
 const resumed = loadAll();
 
 // ——————————————————— main loop ———————————————————
@@ -1209,7 +1241,7 @@ function animate(now) {
   fpsTick(rawDt);
   if (mode === "menu") {
     menuFlyby(rawDt);
-    renderer.render(scene, camera);
+    renderFrame();
     return;
   }
   if (paused || uiBusy) {
@@ -1237,6 +1269,7 @@ function animate(now) {
   sideSpeed = player.vel.x * rightVec.x + player.vel.z * rightVec.z;
   state = (!player.onGround && player.vel.y < -4) ? "falling" : "running";
   updateCreature(dt);
+  if (spiderMixer) spiderMixer.update(Math.hypot(player.vel.x, player.vel.z) * dt * .08);
 
   // suit pulses with proximity danger
   let danger = false;
@@ -1259,14 +1292,200 @@ function animate(now) {
   uiClock += rawDt;
   if (uiClock > .25) { uiClock = 0; updateMarker(); }
 
-  renderer.render(scene, camera);
+  renderFrame();
 }
 let fxSense = 0;
 let vignetteEl = null;
 function renderOnly(now) {
   updateCamera(.016);
   updateToast(now);
-  renderer.render(scene, camera);
+  renderFrame();
+}
+
+// ═══════════════ internet model imports: rigged glTF (robots, dragon, city) ═══════════════
+const MODEL_SOURCES = {
+  spider: "__MODEL_SPIDER__",
+  robot: "__MODEL_ROBOT__",
+  boss: "__MODEL_BOSS__",
+  tokyo: "__MODEL_TOKYO__"
+};
+const importReport = { spider: creature.userData.boneCount || 0, robot: 0, dragon: 0, tokyo: 0 };
+
+const hasEXT = typeof EXT !== "undefined" && EXT.GLTFLoader;
+const gltfLoader = hasEXT ? new EXT.GLTFLoader() : null;
+const skelClone = hasEXT ? EXT.SkeletonUtils.clone : null;
+
+function loadGLB(url, ms = 22000, draco = false) {
+  return new Promise((res, rej) => {
+    if (!gltfLoader) return rej(new Error("no gltf loader"));
+    let loader = gltfLoader;
+    if (draco && EXT.DRACOLoader) {
+      loader = new EXT.GLTFLoader();
+      const dc = new EXT.DRACOLoader();
+      dc.setDecoderPath("https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/libs/draco/gltf/");
+      loader.setDRACOLoader(dc);
+    }
+    let done = false;
+    const fl = new THREE.FileLoader();
+    fl.setResponseType("arraybuffer");
+    const t = setTimeoutSafe(() => { if (!done) { done = true; rej(new Error("timeout")); } }, ms);
+    fl.load(url, buf => {
+      if (done) return; done = true;
+      clearTimeout(t);
+      try { loader.parse(buf, "", g => res(g), e => rej(e)); } catch (e) { rej(e); }
+    }, undefined, e => { if (!done) { done = true; clearTimeout(t); rej(e); } });
+  });
+}
+function countBones(obj) { let n = 0; obj.traverse(o => { if (o.isBone) n++; }); return n; }
+function tintSkins(root, dark) {
+  root.traverse(o => {
+    if (o.isMesh && o.material) {
+      o.material = Array.isArray(o.material) ? o.material.map(m => m.clone()) : o.material.clone();
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of mats) {
+        if (dark) { m.color && m.color.multiplyScalar(.32).offsetHSL(0, 0, .02); }
+        m.metalness = Math.max(m.metalness || 0, .62);
+        m.roughness = Math.min(m.roughness ?? 1, .48);
+        m.envMapIntensity = Math.max(m.envMapIntensity || 0, 1.25);
+        m.fog = true;
+      }
+    }
+  });
+}
+function attachRobot(e) {
+  if (!robotTmpl || !skelClone) return;
+  try {
+    const clone = skelClone(robotTmpl);
+    tintSkins(clone, true);
+    const wrap = new THREE.Group();
+    clone.rotation.y = Math.PI;
+    clone.scale.setScalar(.92);
+    wrap.add(clone);
+    if (e.mesh) { scene.remove(e.mesh); }
+    e.mesh = wrap;
+    scene.add(wrap);
+    e.mix = new THREE.AnimationMixer(clone);
+    e.acts = {};
+    for (const name of ["Idle", "Walking", "Running"]) {
+      if (robotClips[name]) { const a = e.mix.clipAction(robotClips[name]); a.enabled = false; a.setLoop(THREE.LoopRepeat, Infinity); e.acts[name] = a; }
+    }
+    if (e.acts.Idle) { e.acts.Idle.enabled = true; e.acts.Idle.play(); e.robotClip = "Idle"; }
+  } catch (err) { console.warn("robot attach failed → procedural stays", err); }
+}
+function setRobotClip(e, want) {
+  if (!e.acts || !e.acts[want] || e.robotClip === want) return;
+  const prev = e.acts[e.robotClip];
+  const next = e.acts[want];
+  next.enabled = true;
+  if (prev) { prev.enabled = true; prev.fadeOut(.22); }
+  next.reset().fadeIn(.22).play();
+  e.robotClip = want;
+}
+function attachFoxBoss() {
+  if (!bossTmpl || !boss.mesh) return;
+  try {
+    for (const c of boss.mesh.children) c.visible = false;
+    const d = skelClone ? skelClone(bossTmpl) : bossTmpl;
+    d.traverse(o => {
+      if (o.isMesh && o.material) {
+        o.material = Array.isArray(o.material) ? o.material.map(m => m.clone()) : o.material.clone();
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+        for (const m of mats) {
+          m.color && m.color.multiplyScalar(.14);
+          m.emissive && m.emissive.setHex(0x3a0409);
+          m.emissiveIntensity = .85;
+          m.roughness = .38; m.metalness = .55; m.envMapIntensity = 1.4; m.fog = true;
+        }
+      }
+    });
+    const box = new THREE.Box3().setFromObject(d);
+    const sz = new THREE.Vector3(); box.getSize(sz);
+    const sc = 9.6 / Math.max(sz.x, sz.y, .01);   // towering night-fox king
+    d.scale.setScalar(sc);
+    d.position.y = -box.min.y * sc + .2;
+    d.rotation.y = Math.PI;
+    boss.mesh.add(d);
+    boss.pet = d;
+    boss.mix = new THREE.AnimationMixer(d);
+    boss.acts = {};
+    for (const name of Object.keys(bossClips)) {
+      const a = boss.mix.clipAction(bossClips[name]);
+      a.setLoop(THREE.LoopRepeat, Infinity); a.enabled = false;
+      boss.acts[name] = a;
+    }
+    if (boss.acts.Survey) { boss.acts.Survey.enabled = true; boss.acts.Survey.timeScale = .5; boss.acts.Survey.play(); boss.bossClip = "Survey"; }
+  } catch (err) { console.warn("fox attach failed → procedural king stays", err); }
+}
+function setBossClip(name) {
+  if (!boss.acts || !boss.acts[name] || boss.bossClip === name) return;
+  const prev = boss.acts[boss.bossClip];
+  const next = boss.acts[name];
+  next.enabled = true;
+  if (prev) { prev.enabled = true; prev.fadeOut(.3); }
+  next.reset().fadeIn(.3).play();
+  boss.bossClip = name;
+}
+async function importModels() {
+  if (!hasEXT) { toast("وضع أوفلاين — النماذج الإجرائية تكفي 🕷"); return; }
+  try {
+    const g = await loadGLB(MODEL_SOURCES.spider, 30000);
+    const root = g.scene;
+    let skins = 0;
+    root.traverse(o => { if (o.isSkinnedMesh) skins++; });
+    if (!skins || !countBones(root)) throw new Error("Spider has no skin/bone binding");
+    const box = new THREE.Box3().setFromObject(root);
+    const size = box.getSize(new THREE.Vector3()), center = box.getCenter(new THREE.Vector3());
+    const sc = 3.8 / Math.max(size.x, size.z);
+    const wrap = new THREE.Group();
+    root.scale.setScalar(sc);
+    root.position.set(-center.x * sc, -box.min.y * sc - .75, -center.z * sc);
+    root.traverse(o => { if (o.isMesh) { o.material = shellMaterial; o.frustumCulled = false; } });
+    wrap.add(root);
+    for (const child of creature.children) child.visible = false;
+    creature.add(wrap);
+    importedSpider = wrap;
+    spiderMixer = new THREE.AnimationMixer(root);
+    for (const clip of g.animations.filter(c => c.name.startsWith("Armature"))) spiderMixer.clipAction(clip).play();
+    importReport.spider = countBones(root);
+    toast(`عنكبوت آلي مستورد: ${importReport.spider} عظمة، ${skins} مجسمات مربوطة بالعظام`);
+  } catch (err) { console.warn("spider import:", err.message); }
+  try {
+    const g = await loadGLB(MODEL_SOURCES.robot, 16000);
+    robotTmpl = g.scene;
+    g.animations.forEach(c => robotClips[c.name] = c);
+    importReport.robot = countBones(robotTmpl);
+    for (const e of enemies) attachRobot(e);
+    toast(`🦴 استوردت الروبوتات من الإنترنت — كل صياد له ${importReport.robot} عظمة تتحرك`);
+  } catch (err) { console.warn("robot import:", err.message); }
+  try {
+    const g = await loadGLB(MODEL_SOURCES.boss, 20000);
+    bossTmpl = g.scene;
+    g.animations.forEach(c => bossClips[c.name] = c);
+    importReport.dragon = countBones(bossTmpl);
+    if (boss.active) attachFoxBoss();
+    toast(`🦊 الملك الأسود ثعلب الظلام مستورد — ${importReport.dragon} عظمة ويجري فوق البرج`);
+  } catch (err) { console.warn("boss import:", err.message); }
+  try {
+    const g = await loadGLB(MODEL_SOURCES.tokyo, 40000, false);
+    const c = g.scene;
+    for (let i = c.children.length - 1; i >= 0; i--) {
+      const ch = c.children[i];
+      if (ch.isCamera || ch.isLight) c.remove(ch);
+    }
+    c.traverse(o => { if (o.isMesh && o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => { m.fog = false; }); });
+    const box = new THREE.Box3().setFromObject(c);
+    const sz = new THREE.Vector3(); box.getSize(sz);
+    const sc = 115 / Math.max(sz.x, sz.z, .01);
+    c.scale.setScalar(sc);
+    c.position.set(370, -box.min.y * sc - .5, -330);
+    c.rotation.y = .61;
+    scene.add(c);
+    skyline = c;
+    importReport.tokyo = Math.round(sz.y * sc);
+    c.visible = SET.quality !== "low";
+    toast(`🏙 استوردت مدينة كاملة — ناطحات حقيقية تحيط بالأفق (${importReport.tokyo}م ارتفاعًا)`);
+  } catch (err) { console.warn("tokyo import:", err.message); }
+  toast(`🦴 تقرير العظام: عنكبوتك ${importReport.spider} • صيادون ${importReport.robot} • زعيم ${importReport.dragon}`);
 }
 
 // ═══════════════ PC GAME LAYER — states, menu, settings, audio, health, races, gamepad ═══════════════
@@ -1292,10 +1511,19 @@ function applySettings() {
   const pr = SET.quality === "low" ? .7 : SET.quality === "med" ? 1 : Math.min(devicePixelRatio, 1.5);
   renderer.setPixelRatio(pr);
   renderer.setSize(innerWidth, innerHeight);
+  if (composer) {
+    if (composer.setPixelRatio) composer.setPixelRatio(pr);
+    composer.setSize(innerWidth, innerHeight);
+  }
+  if (bloomPass) {
+    bloomOn = SET.quality !== "low";
+    bloomPass.strength = SET.quality === "high" ? .72 : .5;
+  }
   scene.fog.density = SET.quality === "low" ? .0115 : .0082;
   rainActive = SET.quality === "low" ? 130 : SET.quality === "med" ? 280 : RAIN_COUNT;
   rainGeo.setDrawRange(0, rainActive * 2);
   $("fpsBox").classList.toggle("hidden", !SET.showFps);
+  if (skyline) skyline.visible = SET.quality !== "low";
   $("wActions").style.opacity = touchDevice ? "1" : ".55";
   if (sfxG) sfxG.gain.value = SET.sfx;
   if (musG) musG.gain.value = SET.mus;
@@ -1691,13 +1919,16 @@ $("setMus").value = SET.mus;
 $("setFps").value = String(SET.showFps);
 applySettings();
 renderHp(); renderScore();
+$("loading").classList.add("hidden");
 $("mContinue").disabled = !resumed;
 $("wPause").classList.add("hidden");
 document.addEventListener("pointerdown", () => { if (mode === "play") initAudio(); }, { once: true });
 requestAnimationFrame(animate);
+importModels();
 
 window.addEventListener("resize", () => {
   renderer.setSize(innerWidth, innerHeight);
+  if (composer) composer.setSize(innerWidth, innerHeight);
   renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
