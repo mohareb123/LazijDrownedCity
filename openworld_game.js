@@ -23,7 +23,7 @@ function makeRand(seed) {
 }
 
 const TOWER_H = 78;
-const TOWER_S = 12;
+const TOWER_S = 20;
 
 function buildCity(rand) {
   const buildings = [];
@@ -188,7 +188,7 @@ document.body.prepend(renderer.domElement);
 scene.background = new THREE.Color("#0a0e1c");
 scene.fog = new THREE.FogExp2("#0a0e1c", .0082);
 
-const hemi = new THREE.HemisphereLight("#5a6fae", "#0c0f18", 1.5);
+const hemi = new THREE.HemisphereLight("#bfd8ff", "#52627a", 2.5);
 scene.add(hemi);
 const moon = new THREE.DirectionalLight("#aebfff", 1.1);
 moon.position.set(-40, 80, 30);
@@ -237,6 +237,7 @@ try {
   composer.addPass(new PP.RenderPass(scene, camera));
   bloomPass = new PP.UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), .72, .62, .7);
   composer.addPass(bloomPass);
+  composer.addPass(new PP.OutputPass());
   bloomOn = true;
 } catch { composer = null; bloomOn = false; }
 function renderFrame() {
@@ -247,6 +248,7 @@ function renderFrame() {
 // ——————————————————— city meshes ———————————————————
 const rand = makeRand(1973 + 83);
 const city = buildCity(rand);
+let fallbackCityMesh = null;
 
 const groundMesh = new THREE.Mesh(
   new THREE.PlaneGeometry(760, 760).rotateX(-Math.PI / 2),
@@ -283,6 +285,7 @@ scene.add(groundMesh);
   }
   im.instanceMatrix.needsUpdate = true;
   scene.add(im);
+  fallbackCityMesh = im;
 
   // neon rooftop bands — the Spider-Man skyline signature
   const bandGeo = new THREE.BoxGeometry(1, 1, 1);
@@ -291,7 +294,7 @@ scene.add(groundMesh);
   const pal = ["#33e0ff", "#ff4d9d", "#ffb03a", "#8dff5a", "#b388ff", "#ff5340"];
   let bi = 0;
   for (const b of city.buildings) {
-    m.makeScale(b.w * .96, .5, b.d * .96);
+    m.makeScale(b.w * .8, .12, .16);
     m.setPosition(b.x, b.h + .18, b.z);
     bands.setMatrixAt(bi, m);
     col.setStyle(pal[(rand() * pal.length) | 0]);
@@ -853,7 +856,7 @@ let wantJump = false;
 let drag = null;
 
 window.addEventListener("keydown", e => {
-  if (e.ctrlKey || e.altKey || e.metaKey) return;
+  if (e.ctrlKey || e.altKey || e.metaKey || /^(SELECT|INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
   if (e.code === "F1") { e.preventDefault(); }
   if (e.code === "Escape") {
     if (mode === "play" && !document.pointerLockElement && !uiBusy) togglePause();
@@ -869,6 +872,10 @@ window.addEventListener("keydown", e => {
   if (e.code === "F3") { e.preventDefault(); SET.showFps = SET.showFps ? 0 : 1; applySettings(); saveSettings(); return; }
   if (e.code === "KeyM") { startRace(); return; }
   if (paused || uiBusy) return;
+  if (e.code === "KeyC" && !e.repeat) { switchAvatar(); return; }
+  if (e.code === "KeyR" && !e.repeat) { actionTimer = .9; actionKind = 'roll'; return; }
+  if (e.code === "KeyT" && !e.repeat) { actionTimer = 3; actionKind = 'dance'; return; }
+  if (e.code === "KeyF" && !e.repeat) { actionTimer = .65; actionKind = 'attack'; }
   if (e.code === "KeyW" || e.code === "ArrowUp") keys.up = true;
   if (e.code === "KeyS" || e.code === "ArrowDown") keys.down = true;
   if (e.code === "KeyA" || e.code === "ArrowLeft") keys.left = true;
@@ -1052,7 +1059,7 @@ function updateComboHud() {
 function renderBossPips() {
   $("bossPips").textContent = "●".repeat(Math.max(0, boss.hp));
 }
-function setTimeoutSafe(fn, ms) { setTimeout(fn, ms); }
+function setTimeoutSafe(fn, ms) { return setTimeout(fn, ms); }
 
 const mm = $("minimap").getContext("2d");
 const mmCanvas = $("minimap");
@@ -1225,6 +1232,9 @@ function loadAll() {
   return true;
 }
 let importedSpider = null, spiderMixer = null;
+let heroRoot = null, heroMixer = null, heroActions = {}, heroAction = '', avatar = 'spider';
+let actionTimer = 0, actionKind = '', lastGrounded = false, previewHeroClip = '', previewTimer = 0;
+const originalCreatureParts = [...creature.children];
 let robotTmpl = null, robotClips = {}, bossTmpl = null, bossClips = {}, skyline = null;
 const resumed = loadAll();
 
@@ -1269,7 +1279,8 @@ function animate(now) {
   sideSpeed = player.vel.x * rightVec.x + player.vel.z * rightVec.z;
   state = (!player.onGround && player.vel.y < -4) ? "falling" : "running";
   updateCreature(dt);
-  if (spiderMixer) spiderMixer.update(Math.hypot(player.vel.x, player.vel.z) * dt * .08);
+  updateAvatar(dt);
+  $("wSpeed").textContent = Math.round(hs * 3.6);
 
   // suit pulses with proximity danger
   let danger = false;
@@ -1363,6 +1374,7 @@ function attachRobot(e) {
     wrap.add(clone);
     if (e.mesh) { scene.remove(e.mesh); }
     e.mesh = wrap;
+    wrap.position.copy(e.pos);
     scene.add(wrap);
     e.mix = new THREE.AnimationMixer(clone);
     e.acts = {};
@@ -1430,24 +1442,45 @@ async function importModels() {
   try {
     const g = await loadGLB(MODEL_SOURCES.spider, 30000);
     const root = g.scene;
+    // Original model uses rigid bone parenting, not deformable skin weights.
+    // Preserve that imported hierarchy instead of double-transforming each part.
+    const joints = new Set((g.parser.json.skins || []).flatMap(skin => skin.joints));
+    const replacements=[];
+    root.traverse(o => {
+      const assoc=g.parser.associations.get(o);
+      if (assoc && joints.has(assoc.nodes) && !o.isBone) replacements.push(o);
+    });
+    for (const old of replacements) {
+      const bone = new THREE.Bone(); bone.name=old.name;
+      bone.position.copy(old.position);bone.quaternion.copy(old.quaternion);bone.scale.copy(old.scale);
+      const parent=old.parent; for(const child of [...old.children]) bone.add(child);
+      if(parent){parent.remove(old);parent.add(bone);}
+    }
     let skins = 0;
-    root.traverse(o => { if (o.isSkinnedMesh) skins++; });
-    if (!skins || !countBones(root)) throw new Error("Spider has no skin/bone binding");
+    root.traverse(o=>{if(o.isMesh){let p=o.parent;while(p){if(p.isBone){skins++;break;}p=p.parent;}}});
+    if(!countBones(root) || !skins) throw new Error('No rigid bone bindings');
     const box = new THREE.Box3().setFromObject(root);
     const size = box.getSize(new THREE.Vector3()), center = box.getCenter(new THREE.Vector3());
     const sc = 3.8 / Math.max(size.x, size.z);
     const wrap = new THREE.Group();
     root.scale.setScalar(sc);
-    root.position.set(-center.x * sc, -box.min.y * sc - .75, -center.z * sc);
+    root.position.set(-center.x * sc, -box.min.y * sc + .02, -center.z * sc);
     root.traverse(o => { if (o.isMesh) { o.material = shellMaterial; o.frustumCulled = false; } });
     wrap.add(root);
+    // Fixed symbiote carapace over the imported mechanical chassis (no regrowth).
+    const carapace = new THREE.Mesh(new THREE.SphereGeometry(1,24,16), shellMaterial);
+    carapace.scale.set(.48,.28,.58);carapace.position.y=.66;wrap.add(carapace);
+    for(const sign of [-1,1]) {
+      const eye=new THREE.Mesh(new THREE.SphereGeometry(.09,12,8),eyeMaterial);
+      eye.scale.set(1,.65,.45);eye.position.set(sign*.17,.72,-.51);wrap.add(eye);
+    }
     for (const child of creature.children) child.visible = false;
     creature.add(wrap);
     importedSpider = wrap;
     spiderMixer = new THREE.AnimationMixer(root);
-    for (const clip of g.animations.filter(c => c.name.startsWith("Armature"))) spiderMixer.clipAction(clip).play();
+    for (const clip of g.animations) spiderMixer.clipAction(clip).play();
     importReport.spider = countBones(root);
-    toast(`عنكبوت آلي مستورد: ${importReport.spider} عظمة، ${skins} مجسمات مربوطة بالعظام`);
+    toast(`عنكبوت آلي مستورد: ${importReport.spider} عظمة، ${skins} أجزاء مربوطة بالعظام`);
   } catch (err) { console.warn("spider import:", err.message); }
   try {
     const g = await loadGLB(MODEL_SOURCES.robot, 16000);
@@ -1483,9 +1516,106 @@ async function importModels() {
     skyline = c;
     importReport.tokyo = Math.round(sz.y * sc);
     c.visible = SET.quality !== "low";
-    toast(`🏙 استوردت مدينة كاملة — ناطحات حقيقية تحيط بالأفق (${importReport.tokyo}م ارتفاعًا)`);
+    toast("الحي الياباني المستورد جاهز — معلم إضافي بجانب أحياء اللعب");
   } catch (err) { console.warn("tokyo import:", err.message); }
+  await importHero();
+  await importCityBlocks();
   toast(`🦴 تقرير العظام: عنكبوتك ${importReport.spider} • صيادون ${importReport.robot} • زعيم ${importReport.dragon}`);
+}
+
+// Imported CC0 humanoid and animation state machine.
+async function importHero() {
+  try {
+    const g = await loadGLB('models/hero.glb', 30000);
+    heroRoot = new THREE.Group();
+    const model = g.scene;
+    const box = new THREE.Box3().setFromObject(model), size = box.getSize(new THREE.Vector3());
+    const scale = 1.85 / size.y;
+    model.scale.setScalar(scale);
+    model.position.y = -box.min.y * scale;
+    model.rotation.y = Math.PI;
+    const suit = new THREE.MeshStandardMaterial({color:0x123c66, roughness:.42, metalness:.25});
+    model.traverse(o => { if (o.isMesh) { o.material = suit; o.frustumCulled = false; } });
+    heroRoot.add(model); creature.add(heroRoot); heroRoot.visible = false;
+    playHero('Idle_Loop');
+    heroMixer = new THREE.AnimationMixer(model);
+    for (const clip of g.animations) heroActions[clip.name] = heroMixer.clipAction(clip);
+    playHero('Idle_Loop'); heroMixer.update(.01);
+    $('avatarSwitch').disabled = false;
+    const names={Idle_Loop:'وقوف',Walk_Loop:'مشي',Sprint_Loop:'جري سريع',Jog_Fwd_Loop:'هرولة',Jump_Start:'بدء القفز',Jump_Land:'هبوط',Jump_Loop:'في الهواء',Roll:'دحرجة',Dance_Loop:'رقص',Punch_Cross:'لكمة',Crouch_Idle_Loop:'قرفصاء'};
+    for(const name of Object.keys(heroActions)) { const opt=document.createElement('option');opt.value=name;opt.textContent=names[name] || name.replaceAll('_',' ');$('animationSelect').appendChild(opt); }
+    $('animationSelect').onchange=()=>{if(avatar!=='hero')switchAvatar();previewHeroClip=$('animationSelect').value;previewTimer=5;};
+    toast('شخصية بشرية CC0 جاهزة • C للتبديل • R دحرجة • T رقصة • F هجوم');
+  } catch(err) { console.warn('hero import',err.message); }
+}
+function switchAvatar() {
+  if (!heroRoot || !importedSpider || paused || uiBusy) return;
+  avatar = avatar === 'spider' ? 'hero' : 'spider';
+  heroRoot.visible = avatar === 'hero'; importedSpider.visible = avatar === 'spider';
+  for (const part of originalCreatureParts) part.visible = false;
+  actionTimer = 0;
+  updateAvatar(0);
+  $('avatarSwitch').textContent = avatar === 'hero' ? 'C • البطل البشري' : 'C • العنكبوت';
+  toast(avatar === 'hero' ? 'البطل البشري — نفس المكان والتقدم' : 'العنكبوت الآلي — نفس المكان والتقدم');
+}
+function playHero(name, once=false) {
+  if (!heroActions[name] || heroAction === name) return;
+  if (heroActions[heroAction]) heroActions[heroAction].fadeOut(.18);
+  const act = heroActions[name]; act.reset().setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, once ? 1 : Infinity);
+  act.clampWhenFinished = once; act.fadeIn(.18).play(); heroAction = name;
+}
+function updateAvatar(dt) {
+  const speedNow = Math.hypot(player.vel.x, player.vel.z);
+  if (player.onGround && !lastGrounded) { actionTimer = .32; actionKind = 'land'; }
+  lastGrounded = player.onGround;
+  actionTimer = Math.max(0, actionTimer - dt);
+  let pose = web.active ? 'swing' : !player.onGround ? (player.vel.y > 0 ? 'jump' : 'fall') : speedNow > 10 ? 'sprint' : speedNow > .6 ? 'walk' : 'idle';
+  if (actionTimer > 0 && player.onGround) pose = actionKind;
+  if (importedSpider) {
+    for (const part of originalCreatureParts) part.visible = false;
+    importedSpider.visible = avatar === 'spider';
+    // One baked timeline keeps all six rigid leg rigs synchronized. No grow/melt.
+    if (spiderMixer) spiderMixer.update((player.onGround ? speedNow * .075 : .12) * dt);
+    importedSpider.rotation.x = damp(importedSpider.rotation.x, pose === 'swing' ? -.55 : pose === 'jump' ? -.25 : pose === 'land' ? .18 : 0, 9, dt);
+    const phase = performance.now()*.008;
+    importedSpider.position.y = damp(importedSpider.position.y, pose === 'land' ? -.18 : pose === 'dance' ? .1+Math.sin(phase)*.1 : pose === 'idle' ? Math.sin(phase*.25)*.035 : 0, 9, dt);
+    importedSpider.rotation.z = pose === 'roll' ? (1-actionTimer/.9)*Math.PI*2 : pose === 'dance' ? Math.sin(phase)*.16 : 0;
+    importedSpider.position.z = pose === 'attack' ? -Math.sin((1-actionTimer/.65)*Math.PI)*.5 : 0;
+  }
+  const mapping = {idle:'Idle_Loop',walk:'Walk_Loop',sprint:'Sprint_Loop',jump:'Jump_Start',fall:'Jump_Loop',swing:'Jump_Loop',land:'Jump_Land',attack:'Punch_Cross',roll:'Roll',dance:'Dance_Loop'};
+  previewTimer = Math.max(0,previewTimer-dt);
+  if(speedNow>.8 || !player.onGround) previewTimer=0;
+  if (heroMixer) { playHero(previewTimer>0 ? previewHeroClip : mapping[pose] || 'Idle_Loop', previewTimer<=0 && ['jump','land','attack','roll'].includes(pose)); heroMixer.update(dt); }
+  $('avatarState').textContent = ({idle:'وقوف',walk:'مشي',sprint:'جري',jump:'قفز',fall:'سقوط',swing:'تأرجح',land:'هبوط',attack:'هجوم',roll:'دحرجة',dance:'رقص'})[pose] || pose;
+}
+async function importCityBlocks() {
+  const names = ['a','b','c','d','e','f','g','h','i','j','k','l','m','n','skyscraper-a','skyscraper-b','skyscraper-c','skyscraper-d','skyscraper-e'];
+  try {
+    const models = await Promise.all(names.map(n=>loadGLB('models/city/building-'+n+'.glb',30000)));
+    const group = new THREE.Group(); group.name='Imported playable districts';
+    for(let t=0;t<models.length;t++) {
+      const root=models[t].scene; root.updateMatrixWorld(true);
+      const box=new THREE.Box3().setFromObject(root), sz=box.getSize(new THREE.Vector3()), center=box.getCenter(new THREE.Vector3());
+      const matches=city.buildings.filter((b,i)=>b.tower ? t===18 : i % models.length===t);
+      root.traverse(o=>{
+        if(!o.isMesh || !matches.length) return;
+        const geo=o.geometry.clone(); geo.applyMatrix4(o.matrixWorld);
+        geo.translate(-center.x,-box.min.y,-center.z);
+        const mat=o.material.clone(); mat.roughness=.7; mat.metalness=.12;
+        const im=new THREE.InstancedMesh(geo,mat,matches.length), m=new THREE.Matrix4();
+        matches.forEach((b,i)=>{m.makeScale(b.w/sz.x,b.h/sz.y,b.d/sz.z);m.setPosition(b.x,0,b.z);im.setMatrixAt(i,m);});
+        im.instanceMatrix.needsUpdate=true; im.computeBoundingSphere(); group.add(im);
+      });
+    }
+    scene.add(group); fallbackCityMesh.visible=false;
+    // Matching sidewalks and clear eight-metre street corridors.
+    const walk=new THREE.InstancedMesh(new THREE.BoxGeometry(23,.28,23),new THREE.MeshStandardMaterial({color:0x4b5362,roughness:.95}),city.lots.length);
+    const m=new THREE.Matrix4();city.lots.forEach((l,i)=>{m.makeTranslation(l.x,.05,l.z);walk.setMatrixAt(i,m)});scene.add(walk);
+    const marks=[];
+    for(let x=-315;x<=315;x+=30) for(let z=-330;z<=330;z+=8){ marks.push(x,.015,z,x,.015,z+3); marks.push(z,.016,x,z+3,.016,x); }
+    const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(marks,3));scene.add(new THREE.LineSegments(geo,new THREE.LineBasicMaterial({color:0x9da695})));
+    toast(`أحياء اللعب جاهزة: ${city.buildings.length} مبنى مستورد • 19 تصميمًا • شوارع متصلة`);
+  } catch(err) { console.warn('city modules',err.message); toast('تعذر تحميل بعض المباني؛ المدينة الاحتياطية متاحة'); }
 }
 
 // ═══════════════ PC GAME LAYER — states, menu, settings, audio, health, races, gamepad ═══════════════
@@ -1519,7 +1649,7 @@ function applySettings() {
     bloomOn = SET.quality !== "low";
     bloomPass.strength = SET.quality === "high" ? .72 : .5;
   }
-  scene.fog.density = SET.quality === "low" ? .0115 : .0082;
+  scene.fog.density = SET.quality === "low" ? .006 : .0035;
   rainActive = SET.quality === "low" ? 130 : SET.quality === "med" ? 280 : RAIN_COUNT;
   rainGeo.setDrawRange(0, rainActive * 2);
   $("fpsBox").classList.toggle("hidden", !SET.showFps);
@@ -1851,12 +1981,14 @@ function startRun(fresh) {
   $("wPause").classList.remove("hidden");
   if (fresh) resetRun();
   mode = "play";
+  $("avatarPanel").classList.remove("hidden");
   $("menu").classList.add("hidden");
   $("pause").classList.add("hidden");
   saveAll();
   openStory(INTRO, 0);
 }
 function quitToTitle() {
+  $("avatarPanel").classList.add("hidden");
   saveAll();
   mode = "menu";
   paused = false;
@@ -1923,6 +2055,7 @@ $("loading").classList.add("hidden");
 $("mContinue").disabled = !resumed;
 $("wPause").classList.add("hidden");
 document.addEventListener("pointerdown", () => { if (mode === "play") initAudio(); }, { once: true });
+$('avatarSwitch').onclick = switchAvatar;
 requestAnimationFrame(animate);
 importModels();
 

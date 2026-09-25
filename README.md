@@ -54,3 +54,9 @@ cd pc && bash build_exe.sh     # Electron win64 portable zip
 مرخّصة MIT — ابنِ عليها كما تشاء 🕷
 
 </div>
+
+
+## تحديث v1.3 — المرحلة الأولى
+مدينة من 681 مبنى مستورد وتبديل C بين عنكبوت مترابط وبطل بشري CC0.
+مكتبة البطل 46 حركة؛ عرض الحدود والميزات في [PHASE1.md](PHASE1.md).
+حقوق النماذج في [models/CREDITS.md](models/CREDITS.md).

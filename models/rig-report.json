@@ -1,29 +1,74 @@
 {
   "spider": {
-    "skins": 6,
-    "skinned_nodes": 228,
     "unique_joints": 54,
-    "animations": [
-      "BezierCurve.004Action",
-      "BezierCurve.005Action",
-      "BezierCurve.006Action",
-      "BezierCurve.007Action",
-      "BezierCurve.008Action",
-      "BezierCurve.009Action",
-      "bony controlAction",
-      "ArmatureAction",
-      "Armature.001Action",
-      "Armature.002Action",
-      "Armature.003Action",
-      "Armature.004Action",
-      "Armature.005Action"
+    "skinned_nodes": 0,
+    "clips": [
+      "bony control",
+      "Armature",
+      "Armature.001",
+      "Armature.002",
+      "Armature.003",
+      "Armature.004",
+      "Armature.005"
+    ],
+    "binding": "Rigid bone parenting restored; node hierarchy drives mechanical parts; importer promotes original joints to THREE.Bone."
+  },
+  "hero": {
+    "unique_joints": 53,
+    "skinned_nodes": 1,
+    "clips": [
+      "A_TPose",
+      "Crouch_Fwd_Loop",
+      "Crouch_Idle_Loop",
+      "Dance_Loop",
+      "Death01",
+      "Driving_Loop",
+      "Fixing_Kneeling",
+      "Hit_Chest",
+      "Hit_Head",
+      "Idle_Loop",
+      "Idle_Talking_Loop",
+      "Idle_Torch_Loop",
+      "Interact",
+      "Jog_Fwd_Loop",
+      "Jump_Land",
+      "Jump_Loop",
+      "Jump_Start",
+      "PickUp_Table",
+      "Pistol_Aim_Down",
+      "Pistol_Aim_Neutral",
+      "Pistol_Aim_Up",
+      "Pistol_Idle_Loop",
+      "Pistol_Reload",
+      "Pistol_Shoot",
+      "Punch_Cross",
+      "Punch_Enter",
+      "Punch_Jab",
+      "Push_Loop",
+      "Roll",
+      "Roll_RM",
+      "Sitting_Enter",
+      "Sitting_Exit",
+      "Sitting_Idle_Loop",
+      "Sitting_Talking_Loop",
+      "Spell_Simple_Enter",
+      "Spell_Simple_Exit",
+      "Spell_Simple_Idle_Loop",
+      "Spell_Simple_Shoot",
+      "Sprint_Loop",
+      "Swim_Fwd_Loop",
+      "Swim_Idle_Loop",
+      "Sword_Attack",
+      "Sword_Attack_RM",
+      "Sword_Idle",
+      "Walk_Formal_Loop",
+      "Walk_Loop"
     ]
   },
   "robot": {
-    "skins": 2,
-    "skinned_nodes": 2,
     "unique_joints": 43,
-    "animations": [
+    "skinned_nodes": 2,
+    "clips": [
       "Dance",
       "Death",
       "Idle",
@@ -41,20 +86,18 @@
     ]
   },
   "boss": {
-    "skins": 1,
-    "skinned_nodes": 1,
     "unique_joints": 24,
-    "animations": [
+    "skinned_nodes": 1,
+    "clips": [
       "Survey",
       "Walk",
       "Run"
     ]
   },
   "tokyo": {
-    "skins": 1,
-    "skinned_nodes": 8,
     "unique_joints": 32,
-    "animations": [
+    "skinned_nodes": 8,
+    "clips": [
       "Take 001"
     ]
   }

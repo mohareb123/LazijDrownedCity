@@ -40,7 +40,7 @@ import os as _os
 pp_code = ''
 _PP_FILES = ['postprocessing/Pass.js', 'postprocessing/MaskPass.js', 'shaders/CopyShader.js', 'shaders/LuminosityHighPassShader.js',
              'postprocessing/ShaderPass.js', 'postprocessing/EffectComposer.js',
-             'postprocessing/RenderPass.js', 'postprocessing/UnrealBloomPass.js']
+             'postprocessing/RenderPass.js', 'postprocessing/UnrealBloomPass.js', 'shaders/OutputShader.js', 'postprocessing/OutputPass.js']
 if all(_os.path.exists('pp/' + f) for f in _PP_FILES):
     _three_names, _parts = set(), []
     for f in _PP_FILES:
@@ -55,7 +55,7 @@ if all(_os.path.exists('pp/' + f) for f in _PP_FILES):
         t = re.sub(r"export\s*\{[^}]*\}\s*;?", '', t)
         t = re.sub(r"export\s+(?=(?:default\s+)?(?:class|const|let|var|function))", '', t)
         _parts.append('// ——— ' + f + ' ———\n' + t)
-    _ret = 'EffectComposer, RenderPass, ShaderPass, UnrealBloomPass, CopyShader, Pass, FullScreenQuad, MaskPass, ClearMaskPass, LuminosityHighPassShader'
+    _ret = 'OutputPass, EffectComposer, RenderPass, ShaderPass, UnrealBloomPass, CopyShader, Pass, FullScreenQuad, MaskPass, ClearMaskPass, LuminosityHighPassShader'
     pp_code = ('const PP = (() => {\n' + 'const { ' + ', '.join(sorted(_three_names)) + ' } = THREE;\n'
                + '\n'.join(_parts) + '\nreturn { ' + _ret + ' };\n})();\n')
     print('postprocessing inlined:', len(pp_code), 'chars; three-names:', len(_three_names))
@@ -225,6 +225,7 @@ h1 { margin: 8px 0 4px; font-size: clamp(26px, 7vw, 34px); letter-spacing: -1px;
   </div>
   <div class="pill"><span id="wArrow">▲</span><span id="wDist">0م</span><span id="wMission">اجمع قطع النول من الأسطح</span></div>
 </div>
+<div id="avatarPanel" class="hidden" style="position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:6;background:#d9e4f2;color:#192536;border-radius:16px;padding:10px 18px;font-size:13px;text-align:center"><button id="avatarSwitch" disabled style="background:#b9cfea;padding:8px 16px;border-radius:10px;color:#18283d">C • العنكبوت</button> <span id="avatarState">وقوف</span><div>R دحرجة · T رقصة · F هجوم</div><details><summary>استعراض حركات البطل — بدون تأثير قتالي</summary><select id="animationSelect" aria-label="استعراض حركة" style="max-width:220px;padding:7px;border:0;border-radius:8px"><option value="Idle_Loop">اختيار حركة</option></select></details></div>
 <button id="wPause" aria-label="إيقاف">Ⅱ</button>
 <div id="bossWrap" class="hidden"><span>الملك الأسود</span><span id="bossPips">●●●</span></div>
 <div id="wToast"></div>

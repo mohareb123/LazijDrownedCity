@@ -8,3 +8,8 @@
 CC BY 4.0: https://creativecommons.org/licenses/by/4.0/
 CC0: https://creativecommons.org/publicdomain/zero/1.0/
 Three.js and example loader code: MIT, https://github.com/mrdoob/three.js/blob/r169/LICENSE
+
+## v013 additions / corrections
+- Playable city: Kenney City Kit Commercial 2.1, CC0. https://kenney.nl/assets/city-kit-commercial . Nineteen source building designs are instanced across 681 procedural building footprints within a roughly 620 × 620 m district. Existing conservative box colliders remain authoritative; there are no building interiors or detailed facade colliders. Source palette textures embedded in each GLB. See city/LICENSE.txt.
+- Humanoid: Quaternius Universal Animation Library, free Standard edition, CC0. Author: Quaternius, https://quaternius.com/packs/universalanimationlibrary.html . glTF distribution: https://github.com/J-Ponzo/gltf-universal-animation-library . 46 bundled clips; locomotion/action subset selected by the game, all clips available in the animation preview selector. Recolored blue in game. This is a generic original-use mannequin, NOT Marvel's Spider-Man and not an official Spider-Man model.
+- Spider correction: v010's conversion to skin weights was visually incorrect. v013 restores the original RIGID bone-parent hierarchy and exports a shared sampled scene timeline. Importer promotes original joint nodes to Three.js Bones without altering the rigid attachments. No claim is made that this mechanical model uses deformable SkinnedMesh weights. 54 joints; six-legged mechanical design. Added fixed symbiote carapace/eyes in game. Walk/run use the source gait; jump/swing/landing/attack/dance/roll presentation uses procedural offsets. It does NOT have 46 bespoke spider animation clips.
