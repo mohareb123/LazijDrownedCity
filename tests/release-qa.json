@@ -1,0 +1,108 @@
+{
+  "result": {
+    "bones": [
+      "head",
+      "upperL",
+      "foreL",
+      "handL",
+      "upperR",
+      "foreR",
+      "handR",
+      "thighL",
+      "shinL",
+      "footL",
+      "thighR",
+      "shinR",
+      "footR"
+    ],
+    "restore": true,
+    "clips": 48,
+    "instances": 153,
+    "climbing": true,
+    "action": "WallClimb",
+    "hand": [
+      13.120865776006035,
+      58.77896078190989,
+      -0.28165555420057486
+    ],
+    "save": {
+      "got": 0,
+      "flags": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mission": "find",
+      "hp": 5,
+      "score": 0,
+      "raceBest": 0,
+      "avatar": "hero",
+      "bossHp": 0,
+      "pos": [
+        13.52,
+        57.500000000000014,
+        0
+      ],
+      "v": 3
+    }
+  },
+  "states": [
+    [
+      "Idle_Loop",
+      "Idle_Loop"
+    ],
+    [
+      "Walk_Loop",
+      "Walk_Loop"
+    ],
+    [
+      "Sprint_Loop",
+      "Sprint_Loop"
+    ],
+    [
+      "Jump_Start",
+      "Jump_Start"
+    ],
+    [
+      "Jump_Loop",
+      "Jump_Loop"
+    ]
+  ],
+  "switched": {
+    "avatar": "spider",
+    "pos": [
+      45,
+      0,
+      45
+    ]
+  },
+  "flow": {
+    "pauseClearsInput": true,
+    "eightPartsSpawnBoss": true,
+    "bossMissionSaved": true,
+    "health": [
+      2,
+      1,
+      0
+    ],
+    "finished": true,
+    "endingSaved": true,
+    "freshGame": true,
+    "respawn": true,
+    "raceStarted": true,
+    "raceFinished": true,
+    "raceTime": 1.25,
+    "loadRestoresPosition": true
+  },
+  "errors": [],
+  "warnings": []
+}

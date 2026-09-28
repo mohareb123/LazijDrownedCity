@@ -77,6 +77,25 @@ function buildCity(rand) {
   return { buildings, lots, index, cells };
 }
 
+function wallAt(city, pos) {
+  const ix=Math.round(pos.x/30), iz=Math.round(pos.z/30);
+  let best=null, distance=1.25;
+  for(let x=ix-1;x<=ix+1;x++)for(let z=iz-1;z<=iz+1;z++) {
+    for(const b of city.index.get(`${x},${z}`)||[]) {
+      if(pos.y>b.h+.2)continue;
+      const dx=pos.x-b.x,dz=pos.z-b.z;
+      if(Math.abs(dz)<b.d/2+.2) {
+        const d=Math.abs(Math.abs(dx)-b.w/2);
+        if(d<distance){distance=d;best={b,nx:Math.sign(dx)||1,nz:0};}
+      }
+      if(Math.abs(dx)<b.w/2+.2) {
+        const d=Math.abs(Math.abs(dz)-b.d/2);
+        if(d<distance){distance=d;best={b,nx:0,nz:Math.sign(dz)||1};}
+      }
+    }
+  }
+  return best;
+}
 function groundAt(city, x, z) {
   const k = `${Math.round(x / 30)},${Math.round(z / 30)}`;
   let y = 0;
@@ -185,7 +204,14 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.18;
 document.body.prepend(renderer.domElement);
 
-scene.background = new THREE.Color("#0a0e1c");
+{
+  const c=document.createElement('canvas');c.width=1024;c.height=512;
+  const ctx=c.getContext('2d'),g=ctx.createLinearGradient(0,0,0,512);
+  g.addColorStop(0,'#030813');g.addColorStop(.46,'#192b45');g.addColorStop(.56,'#30455c');g.addColorStop(1,'#070c18');ctx.fillStyle=g;ctx.fillRect(0,0,1024,512);
+  const skyRand=makeRand(109);
+  for(let i=0;i<200;i++){ctx.fillStyle=`rgba(212,230,255,${.2+skyRand()*.55})`;ctx.fillRect(skyRand()*1024,skyRand()*215,1,1);}
+  const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;tex.mapping=THREE.EquirectangularReflectionMapping;scene.background=tex;
+}
 scene.fog = new THREE.FogExp2("#0a0e1c", .0082);
 
 const hemi = new THREE.HemisphereLight("#bfd8ff", "#52627a", 2.5);
@@ -262,6 +288,22 @@ scene.add(groundMesh);
   const mat = new THREE.MeshStandardMaterial({
     color: "#2b3247", roughness: .42, metalness: .48, envMapIntensity: 1.1
   });
+  mat.onBeforeCompile = shader => {
+    shader.vertexShader='varying vec3 vCityP;varying vec3 vCityN;\n'+shader.vertexShader;
+    shader.vertexShader=shader.vertexShader.replace('#include <project_vertex>',`vCityN=normal;
+      vec4 cityP=vec4(transformed,1.0);
+      #ifdef USE_INSTANCING
+      cityP=instanceMatrix*cityP;
+      #endif
+      vCityP=(modelMatrix*cityP).xyz;
+      #include <project_vertex>`);
+    shader.fragmentShader='varying vec3 vCityP;varying vec3 vCityN;\n'+shader.fragmentShader;
+    shader.fragmentShader=shader.fragmentShader.replace('#include <emissivemap_fragment>',`#include <emissivemap_fragment>
+      float column=mix(vCityP.x,vCityP.z,step(.5,abs(vCityN.x)));
+      float lit=step(.36,fract(sin(floor(column*.4)*12.99+floor(vCityP.y*.45)*78.23)*43758.54));
+      float panes=step(.24,fract(column*.4))*step(fract(column*.4),.64)*step(.2,fract(vCityP.y*.45))*step(fract(vCityP.y*.45),.65);
+      totalEmissiveRadiance+=vec3(.19,.27,.38)*panes*lit*(1.0-abs(vCityN.y));`);
+  };
   const im = new THREE.InstancedMesh(geo, mat, city.buildings.length + city.lots.length);
   const m = new THREE.Matrix4();
   const col = new THREE.Color();
@@ -346,6 +388,30 @@ const rightVec = new THREE.Vector3();
 /*__PHYS_LOGIC_START__*/
 function stepPlayer(dt) {
   const p = player;
+  p.wallCooldown=Math.max(0,(p.wallCooldown||0)-dt);
+  p.climbing=false;
+  if(input.climb && !web.active && !p.wallCooldown) {
+    const wall=wallAt(city,p.pos);
+    if(wall) {
+      const {b,nx,nz}=wall;
+      p.climbing=true; p.wallNormal={x:nx,z:nz}; p.onGround=false;
+      p.heading=Math.atan2(nx,nz);fwdVec.set(-nx,0,-nz);rightVec.set(nz,0,-nx);
+      if(nx) p.pos.x=b.x+nx*(b.w/2+.52);
+      else p.pos.z=b.z+nz*(b.d/2+.52);
+      p.vel.set(0,input.forward<-.1?-5:7,0);
+      if(wantJump) {
+        wantJump=false;p.wallCooldown=.65;p.climbing=false;
+        p.vel.set(nx*8,10,nz*8);sfxJump();
+      } else {
+        p.pos.y=Math.max(0,p.pos.y+p.vel.y*dt);
+        // Sideways crawling along the contacted facade.
+        if(nx)p.pos.z=clamp(p.pos.z+input.strafe*3*dt,b.z-b.d/2+.4,b.z+b.d/2-.4);
+        else p.pos.x=clamp(p.pos.x-input.strafe*3*dt,b.x-b.w/2+.4,b.x+b.w/2-.4);
+        if(p.pos.y>=b.h+.12){p.pos.y=b.h;p.pos.x-=nx*1.1;p.pos.z-=nz*1.1;p.onGround=true;p.climbing=false;p.vel.set(0,0,0);p.wallCooldown=.4;}
+        return;
+      }
+    }
+  }
   // desired planar move from input, camera-relative
   const fx = -Math.sin(camYaw), fz = -Math.cos(camYaw);
   const rx = Math.cos(camYaw), rz = -Math.sin(camYaw);
@@ -436,7 +502,7 @@ function releaseWeb() {
 function ensureWebLine() {
   if (!web.line) {
     web.line = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+      new THREE.BufferGeometry().setAttribute("position",new THREE.Float32BufferAttribute(new Float32Array(13*3),3)),
       new THREE.LineBasicMaterial({ color: "#eef4ff", transparent: true, opacity: .9, depthTest: false })
     );
     scene.add(web.line);
@@ -446,7 +512,11 @@ function ensureWebLine() {
 function updateWebLine() {
   if (!web.active || !web.line) return;
   tmpB.copy(player.pos); tmpB.y += 1.1;
-  web.line.geometry.setFromPoints([tmpB, web.anchor]);
+  if(avatar==='hero' && heroBones.handR) heroBones.handR.getWorldPosition(tmpB);
+  const attr=web.line.geometry.attributes.position;
+  const sag=web.taut?.12:Math.min(2,web.len*.055);
+  for(let i=0;i<=12;i++){const t=i/12;attr.setXYZ(i,lerp(tmpB.x,web.anchor.x,t),lerp(tmpB.y,web.anchor.y,t)-4*sag*t*(1-t),lerp(tmpB.z,web.anchor.z,t));}
+  attr.needsUpdate=true;web.line.geometry.computeBoundingSphere();
 }
 
 // ——————————————————— parts of the Great Loom ———————————————————
@@ -602,12 +672,13 @@ function updateEnemies(dt) {
 
 function shootWeb() {
   if (uiBusy || paused || fxShootCd > 0) return;
+  actionTimer=.65;actionKind='attack';
   sfxShot();
   fxShootCd = .35;
   // boss first
   if (boss.active) {
     const d = tmpB.copy(boss.pos).sub(player.pos);
-    if (d.length() < 36) {
+    if (d.length() < 36 && player.pos.y > TOWER_H-3) {
       hitBoss();
       tmpA.copy(player.pos); tmpA.y += 1;
       tmpB.copy(boss.pos); tmpB.y += 1.4;
@@ -690,6 +761,8 @@ const boss = {
   hp: 3, phase: "idle", t: 0, ring: null, stun: 0
 };
 function summonBoss() {
+  if(boss.mesh)scene.remove(boss.mesh);if(boss.ring)scene.remove(boss.ring);
+  boss.stun=0;boss.phase="idle";boss.t=2;
   if (boss.mesh) return;
   const g = new THREE.Group();
   const abd = hardShell(new THREE.OctahedronGeometry(.62, 0));
@@ -745,10 +818,13 @@ function summonBoss() {
   attachFoxBoss();
 }
 function hitBoss() {
+  if(!boss.active || boss.stun>0)return;
+  boss.hp=Math.max(0,boss.hp-1);
   sfxHit();
   score += 300;
   renderScore();
   boss.stun = 1.6;
+  saveAll();
   boss.ring.visible = false;
   boss.phase = "idle";
   fxSlow = .6;
@@ -763,10 +839,10 @@ function hitBoss() {
     sfxBoss();
     score += 1000;
     renderScore();
-    toast("انحنى الملك الأسود… الجسر لك يا لَزِج");
+    toast("انحنى الملك الأسود… المدينة حرة يا لَزِج");
     mission = "done";
     saveAll();
-    setTimeoutSafe(() => { $("wOverlay").dataset.done = "1"; openStory(ENDING, 0); }, 1400);
+    setTimeoutSafe(() => { if(mission!=="done"||mode!=="play")return; $("wOverlay").dataset.done = "1"; openStory(ENDING, 0); }, 1400);
   }
 }
 function updateBoss(dt) {
@@ -836,6 +912,7 @@ function tryCollect(dt) {
       if (partsGot >= 8 && mission === "find") {
         mission = "boss";
         summonBoss();
+        saveAll();
         toast("ثمانية تكفي. البرج الأوسط يغلي بالأسود — الملك الأسود صعد السطح. طِر إليه");
       }
     }
@@ -850,7 +927,7 @@ function partsStory(n) {
 }
 
 // ——————————————————— input ———————————————————
-const input = { forward: 0, strafe: 0, sprint: false };
+const input = { forward: 0, strafe: 0, sprint: false, climb: false };
 const keys = { left: false, right: false, up: false, down: false };
 let wantJump = false;
 let drag = null;
@@ -872,8 +949,9 @@ window.addEventListener("keydown", e => {
   if (e.code === "F3") { e.preventDefault(); SET.showFps = SET.showFps ? 0 : 1; applySettings(); saveSettings(); return; }
   if (e.code === "KeyM") { startRace(); return; }
   if (paused || uiBusy) return;
+  if (e.code === "KeyQ") { input.climb=true; e.preventDefault(); }
   if (e.code === "KeyC" && !e.repeat) { switchAvatar(); return; }
-  if (e.code === "KeyR" && !e.repeat) { actionTimer = .9; actionKind = 'roll'; return; }
+  if (e.code === "KeyR" && !e.repeat && player.onGround && actionTimer<=0) { actionTimer = .9; actionKind = 'roll'; invuln=Math.max(invuln,.4); player.vel.addScaledVector(fwdVec,5); return; }
   if (e.code === "KeyT" && !e.repeat) { actionTimer = 3; actionKind = 'dance'; return; }
   if (e.code === "KeyF" && !e.repeat) { actionTimer = .65; actionKind = 'attack'; }
   if (e.code === "KeyW" || e.code === "ArrowUp") keys.up = true;
@@ -887,6 +965,7 @@ window.addEventListener("keydown", e => {
   syncKeys();
 });
 window.addEventListener("keyup", e => {
+  if(e.code === "KeyQ") input.climb=false;
   if (e.code === "KeyW" || e.code === "ArrowUp") keys.up = false;
   if (e.code === "KeyS" || e.code === "ArrowDown") keys.down = false;
   if (e.code === "KeyA" || e.code === "ArrowLeft") keys.left = false;
@@ -895,6 +974,12 @@ window.addEventListener("keyup", e => {
   if (e.code === "KeyE") releaseWeb();
   syncKeys();
 });
+function clearControls() {
+  for(const k of Object.keys(keys))keys[k]=false;
+  input.forward=0;input.strafe=0;input.climb=false;input.sprint=false;wantJump=false;
+}
+window.addEventListener('blur',()=>{clearControls();if(mode==='play'&&!uiBusy)setPaused(true);});
+window.addEventListener('pagehide',saveAll);
 function syncKeys() {
   input.forward = (keys.up ? 1 : 0) - (keys.down ? 1 : 0);
   input.strafe = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
@@ -930,6 +1015,7 @@ function bindHold(id, down, up) {
   b.addEventListener("pointercancel", () => up && up());
 }
 bindHold("wJump", () => { wantJump = true; });
+bindHold("wClimb", () => {input.climb=true;}, () => {input.climb=false;});
 bindHold("wWeb", attachWeb, releaseWeb);
 bindHold("wShoot", shootWeb);
 $("wPause").addEventListener("click", () => togglePause());
@@ -960,7 +1046,16 @@ function updateCamera(dt) {
     player.pos.z + Math.cos(camYaw) * camDist
   );
   camPos.lerp(tmpA, 1 - Math.exp(-6 * dt));
-  camera.position.copy(camPos);
+  const origin=new THREE.Vector3(player.pos.x,player.pos.y+1.25,player.pos.z);
+  const dir=camPos.clone().sub(origin), desired=dir.length();
+  dir.normalize(); const ray=new THREE.Ray(origin,dir), hit=new THREE.Vector3();
+  let allowed=desired;
+  const ix=Math.round(player.pos.x/30),iz=Math.round(player.pos.z/30);
+  for(let x=ix-1;x<=ix+1;x++)for(let z=iz-1;z<=iz+1;z++)for(const b of city.index.get(`${x},${z}`)||[]) {
+    const box=new THREE.Box3(new THREE.Vector3(b.x-b.w/2-.15,0,b.z-b.d/2-.15),new THREE.Vector3(b.x+b.w/2+.15,b.h+.2,b.z+b.d/2+.15));
+    if(!box.containsPoint(origin) && ray.intersectBox(box,hit)) allowed=Math.min(allowed,Math.max(.65,origin.distanceTo(hit)-.2));
+  }
+  camera.position.copy(origin).addScaledVector(dir,allowed);
   if (fxCamShake > 1e-3) {
     camera.position.x += (Math.random() - .5) * fxCamShake;
     camera.position.y += (Math.random() - .5) * fxCamShake * .8;
@@ -1180,11 +1275,11 @@ $("wBack").addEventListener("click", () => {
 const INTRO = [
   ["مدينة تحت المطر", "بعد معارك الجزر، قاد أثرُ النول الكبير لَزِجَ إلى المدينة الغارقة: ناطحاتٌ لا تنام، أزقةٌ يزحف فيها جنودُ الملك الأسود، وسطحٌ لكل قصة هرب."],
   ["حكمة نَسْمة", "همست الجدة عبر خيطٍ قديم: «هذه المدينة لا تحتاج فاتحًا يا حفيدي، بل من يمرّ في سمائها. أرجل حادة، قلب ليّن… وصبرٌ في التأرجح»."],
-  ["المهمة", "اثنتا عشرة قطعة من النول الكبير متناثرة على الأسطح. اجمع ثمانيًا وسيصعد الملك نفسه إلى أعلى برج. على الكمبيوتر: انقر بالماوس لقفل النظر — WASD حركة، Space قفز، E أو الزر الأيمن تأرجح، F أو الزر الأيسر شبكة، Shift جري، V المنظور، M سباق الأسطح، ESC إيقاف."]
+  ["المهمة", "اثنتا عشرة قطعة من النول الكبير متناثرة على الأسطح. اجمع ثمانيًا وسيصعد الملك نفسه إلى أعلى برج. على الكمبيوتر: انقر بالماوس لقفل النظر — WASD حركة، Space قفز، E أو الزر الأيمن تأرجح، F أو الزر الأيسر شبكة، Shift جري، Q تسلق وS نزول أثناء التسلق، C تبديل الشخصية، R دحرجة، T رقصة، V المنظور، M سباق الأسطح، ESC إيقاف."]
 ];
 const ENDING = [
   ["سقوط الملك", "عندما ارتطمت الشبكة الثالثة بصدره، ترجّح الملك الأسود من فوق البرج كجبلٍ من القار، وذاب قبل أن يلمس الأرض. غسل المطرُ نيون المدينة، ولأول مرة منذ سنين… صارت الأبراج لامعة لا مرعِبة."],
-  ["مدينة بلا ملك", "جُمعت خيوطه وأُعيد النول الكبير — لا لعرشٍ، بل لطاولة. ضحكت نَسْمة: «لهذا تُصنع الجسور». والمدينة صارت لك: تأرجح حيث شئت، وحرّر ما تبقى من قطع، فالأبواب مفتوحة أبدًا."]
+  ["مدينة بلا ملك", "جُمعت خيوطه وأُعيد النول الكبير — لا لعرشٍ، بل لطاولة. ضحكت نَسْمة: «لهذا تُنسج الخيوط». والمدينة صارت لك: تأرجح حيث شئت، وحرّر ما تبقى من قطع، فالأبواب مفتوحة أبدًا."]
 ];
 
 let paused = false;
@@ -1194,6 +1289,7 @@ function togglePause() {
 }
 document.addEventListener("visibilitychange", () => {
   if (document.hidden && mode === "play") {
+    clearControls();saveAll();
     paused = true;
     $("wPause").textContent = "▶";
     $("pause").classList.remove("hidden");
@@ -1207,16 +1303,16 @@ function saveAll() {
       got: parts.filter(p => p.taken).length,
       flags: parts.map(p => p.taken ? 1 : 0),
       mission,
-      hp, score, raceBest,
+      hp, score, raceBest, avatar, bossHp:boss.active?boss.hp:0,
       pos: [player.pos.x, player.pos.y, player.pos.z],
-      v: 2
+      v: 3
     }));
   } catch {}
 }
 function loadAll() {
   let data = null;
   try { data = JSON.parse(localStorage.getItem("lazij-open") || "null"); } catch {}
-  if (!data || (data.v !== 1 && data.v !== 2)) return false;
+  if (!data || ![1,2,3].includes(data.v)) return false;
   for (let i = 0; i < Math.min(parts.length, (data.flags || []).length); i++) {
     if (data.flags[i]) {
       parts[i].taken = true;
@@ -1226,14 +1322,18 @@ function loadAll() {
   }
   partsGot = data.got || parts.filter(p => p.taken).length;
   mission = data.mission || "find";
-  if (data.pos) player.pos.set(data.pos[0], data.pos[1], data.pos[2]);
-  hp = data.hp ?? hp; score = data.score || 0; raceBest = data.raceBest || 0;
-  if (mission === "boss") summonBoss();
+  if (Array.isArray(data.pos) && data.pos.length===3 && data.pos.every(Number.isFinite)) player.pos.set(clamp(data.pos[0],-345,345),clamp(data.pos[1],0,250),clamp(data.pos[2],-345,345));
+  avatar=data.avatar==='hero'?'hero':'spider';
+  hp = clamp(Number(data.hp)||5,1,5); score = Math.max(0,Number(data.score)||0); raceBest = Math.max(0, Number(data.raceBest)||0);
+  if (mission === "boss") {summonBoss();boss.hp=clamp(Number(data.bossHp)||3,1,3);renderBossPips();}
   return true;
 }
 let importedSpider = null, spiderMixer = null;
 let heroRoot = null, heroMixer = null, heroActions = {}, heroAction = '', avatar = 'spider';
 let actionTimer = 0, actionKind = '', lastGrounded = false, previewHeroClip = '', previewTimer = 0;
+let heroBones = {}, poseTime=0, saveClock=0, lodClock=0;
+const cityDetailBatches=[];
+let wallPoseBlend=0;
 const originalCreatureParts = [...creature.children];
 let robotTmpl = null, robotClips = {}, bossTmpl = null, bossClips = {}, skyline = null;
 const resumed = loadAll();
@@ -1245,10 +1345,13 @@ let uiClock = 0;
 
 function animate(now) {
   requestAnimationFrame(animate);
-  const rawDt = Math.min((now - lastTime) / 1000, .04);
+  const elapsed = Math.max(.001,(now - lastTime) / 1000);
+  const rawDt = Math.min(elapsed, .04);
   lastTime = now;
   frame++;
-  fpsTick(rawDt);
+  fpsTick(elapsed);
+  lodClock+=rawDt;
+  if(lodClock>.4){lodClock=0;updateCityLOD();}
   if (mode === "menu") {
     menuFlyby(rawDt);
     renderFrame();
@@ -1258,6 +1361,7 @@ function animate(now) {
     renderOnly(now);
     return;
   }
+  saveClock+=rawDt;if(saveClock>15){saveClock=0;saveAll();}
   pollGamepad();
   updateRace(rawDt);
   scoreShown = damp(scoreShown, score, 5, rawDt);
@@ -1268,7 +1372,7 @@ function animate(now) {
   if (boss.active) updateBoss(dt);
   tryCollect(dt);
   updateFx(dt);
-  updateWebLine();
+  updateFlecks(dt);
   updateRainWorld(rawDt);
 
   // feed the creature rig
@@ -1280,6 +1384,8 @@ function animate(now) {
   state = (!player.onGround && player.vel.y < -4) ? "falling" : "running";
   updateCreature(dt);
   updateAvatar(dt);
+  creature.updateMatrixWorld(true);
+  updateWebLine();
   $("wSpeed").textContent = Math.round(hs * 3.6);
 
   // suit pulses with proximity danger
@@ -1520,6 +1626,7 @@ async function importModels() {
   } catch (err) { console.warn("tokyo import:", err.message); }
   await importHero();
   await importCityBlocks();
+  $('assetStatus').textContent = heroRoot && cityDetailBatches.length ? 'جاهز • نَسّاج والمدينة' : 'وضع احتياطي — بعض النماذج لم تُحمَّل';
   toast(`🦴 تقرير العظام: عنكبوتك ${importReport.spider} • صيادون ${importReport.robot} • زعيم ${importReport.dragon}`);
 }
 
@@ -1534,13 +1641,42 @@ async function importHero() {
     model.scale.setScalar(scale);
     model.position.y = -box.min.y * scale;
     model.rotation.y = Math.PI;
-    const suit = new THREE.MeshStandardMaterial({color:0x123c66, roughness:.42, metalness:.25});
+    const suit = new THREE.MeshStandardMaterial({color:0xffffff, vertexColors:true, roughness:.5, metalness:.28,emissive:0x06242b,emissiveIntensity:.45});
+    model.traverse(o=>{
+      if(o.isBone) {
+        const name=o.name.replace(/[^a-z0-9]/gi,'').toLowerCase();
+        const wanted={'defupperarml':'upperL','defupperarmr':'upperR','defforearml':'foreL','defforearmr':'foreR','defhandl':'handL','defhandr':'handR','defhead':'head','defshinl':'shinL','defshinr':'shinR','deffootl':'footL','deffootr':'footR','defthighl':'thighL','defthighr':'thighR'};
+        if(wanted[name])heroBones[wanted[name]]=o;
+      }
+      if(o.isMesh) {
+        const geom=o.geometry.clone(), pos=geom.attributes.position, colors=[];
+        for(let i=0;i<pos.count;i++) {
+          const x=pos.getX(i),y=pos.getY(i),z=pos.getZ(i);
+          let col=new THREE.Color(0x142434);
+          if(y<.3 || Math.abs(x)>.65)col.setHex(0x168b8a);
+          if(y>1.08 && y<1.5 && Math.abs(x)<.28 && z>.04) {
+            col.setHex(Math.abs(Math.abs(x)-(1.48-y)*.48)<.045?0x79f3d2:0x20566c);
+          }
+          // Paired ivory lenses on the original mask, not a licensed character skin.
+          if(y>1.66&&y<1.72&&Math.abs(x)>.025&&Math.abs(x)<.085&&z>.09)col.setHex(0xd8fff1);
+          colors.push(col.r,col.g,col.b);
+        }
+        geom.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));o.geometry=geom;
+      }
+    });
     model.traverse(o => { if (o.isMesh) { o.material = suit; o.frustumCulled = false; } });
     heroRoot.add(model); creature.add(heroRoot); heroRoot.visible = false;
     playHero('Idle_Loop');
     heroMixer = new THREE.AnimationMixer(model);
     for (const clip of g.animations) heroActions[clip.name] = heroMixer.clipAction(clip);
+    // Separate author-created base clips for wall/swing; upper limbs are driven by IK below.
+    for(const [name,base] of [['WebSwing','Idle_Loop'],['WallClimb','Crouch_Idle_Loop']]) {
+      const clip=g.animations.find(c=>c.name===base).clone();clip.name=name;
+      heroActions[name]=heroMixer.clipAction(clip);
+    }
     playHero('Idle_Loop'); heroMixer.update(.01);
+    heroRoot.visible=avatar==='hero';if(importedSpider)importedSpider.visible=avatar==='spider';
+    $('avatarSwitch').textContent=avatar==='hero'?'C • نَسّاج':'C • العنكبوت';
     $('avatarSwitch').disabled = false;
     const names={Idle_Loop:'وقوف',Walk_Loop:'مشي',Sprint_Loop:'جري سريع',Jog_Fwd_Loop:'هرولة',Jump_Start:'بدء القفز',Jump_Land:'هبوط',Jump_Loop:'في الهواء',Roll:'دحرجة',Dance_Loop:'رقص',Punch_Cross:'لكمة',Crouch_Idle_Loop:'قرفصاء'};
     for(const name of Object.keys(heroActions)) { const opt=document.createElement('option');opt.value=name;opt.textContent=names[name] || name.replaceAll('_',' ');$('animationSelect').appendChild(opt); }
@@ -1555,7 +1691,8 @@ function switchAvatar() {
   for (const part of originalCreatureParts) part.visible = false;
   actionTimer = 0;
   updateAvatar(0);
-  $('avatarSwitch').textContent = avatar === 'hero' ? 'C • البطل البشري' : 'C • العنكبوت';
+  $('avatarSwitch').textContent = avatar === 'hero' ? 'C • نَسّاج' : 'C • العنكبوت';
+  saveAll();
   toast(avatar === 'hero' ? 'البطل البشري — نفس المكان والتقدم' : 'العنكبوت الآلي — نفس المكان والتقدم');
 }
 function playHero(name, once=false) {
@@ -1565,29 +1702,97 @@ function playHero(name, once=false) {
   act.clampWhenFinished = once; act.fadeIn(.18).play(); heroAction = name;
 }
 function updateAvatar(dt) {
+  poseTime+=dt;
   const speedNow = Math.hypot(player.vel.x, player.vel.z);
+  if(actionKind==='dance'&&speedNow>.8)actionTimer=0;
   if (player.onGround && !lastGrounded) { actionTimer = .32; actionKind = 'land'; }
   lastGrounded = player.onGround;
   actionTimer = Math.max(0, actionTimer - dt);
-  let pose = web.active ? 'swing' : !player.onGround ? (player.vel.y > 0 ? 'jump' : 'fall') : speedNow > 10 ? 'sprint' : speedNow > .6 ? 'walk' : 'idle';
+  let pose = player.climbing ? 'climb' : web.active ? 'swing' : !player.onGround ? (player.vel.y > 0 ? 'jump' : 'fall') : speedNow > 10 ? 'sprint' : speedNow > .6 ? 'walk' : 'idle';
   if (actionTimer > 0 && player.onGround) pose = actionKind;
+  wallPoseBlend=damp(wallPoseBlend,player.climbing?1:0,12,dt);
   if (importedSpider) {
     for (const part of originalCreatureParts) part.visible = false;
     importedSpider.visible = avatar === 'spider';
     // One baked timeline keeps all six rigid leg rigs synchronized. No grow/melt.
-    if (spiderMixer) spiderMixer.update((player.onGround ? speedNow * .075 : .12) * dt);
-    importedSpider.rotation.x = damp(importedSpider.rotation.x, pose === 'swing' ? -.55 : pose === 'jump' ? -.25 : pose === 'land' ? .18 : 0, 9, dt);
+    if (spiderMixer) spiderMixer.update((player.climbing ? 1.1 : player.onGround ? speedNow * .075 : .12) * dt);
+    importedSpider.rotation.x = damp(importedSpider.rotation.x, pose === 'climb' ? -Math.PI/2 : pose === 'swing' ? -.55 : pose === 'jump' ? -.25 : pose === 'land' ? .18 : 0, 9, dt);
     const phase = performance.now()*.008;
     importedSpider.position.y = damp(importedSpider.position.y, pose === 'land' ? -.18 : pose === 'dance' ? .1+Math.sin(phase)*.1 : pose === 'idle' ? Math.sin(phase*.25)*.035 : 0, 9, dt);
     importedSpider.rotation.z = pose === 'roll' ? (1-actionTimer/.9)*Math.PI*2 : pose === 'dance' ? Math.sin(phase)*.16 : 0;
-    importedSpider.position.z = pose === 'attack' ? -Math.sin((1-actionTimer/.65)*Math.PI)*.5 : 0;
+    importedSpider.position.z = pose === 'climb' ? .1 : pose === 'attack' ? -Math.sin((1-actionTimer/.65)*Math.PI)*.5 : 0;
   }
-  const mapping = {idle:'Idle_Loop',walk:'Walk_Loop',sprint:'Sprint_Loop',jump:'Jump_Start',fall:'Jump_Loop',swing:'Jump_Loop',land:'Jump_Land',attack:'Punch_Cross',roll:'Roll',dance:'Dance_Loop'};
+  const mapping = {idle:'Idle_Loop',walk:'Walk_Loop',sprint:'Sprint_Loop',jump:'Jump_Start',fall:'Jump_Loop',swing:'WebSwing',climb:'WallClimb',land:'Jump_Land',attack:'Punch_Cross',hit:'Hit_Chest',roll:'Roll',dance:'Dance_Loop'};
   previewTimer = Math.max(0,previewTimer-dt);
   if(speedNow>.8 || !player.onGround) previewTimer=0;
-  if (heroMixer) { playHero(previewTimer>0 ? previewHeroClip : mapping[pose] || 'Idle_Loop', previewTimer<=0 && ['jump','land','attack','roll'].includes(pose)); heroMixer.update(dt); }
-  $('avatarState').textContent = ({idle:'وقوف',walk:'مشي',sprint:'جري',jump:'قفز',fall:'سقوط',swing:'تأرجح',land:'هبوط',attack:'هجوم',roll:'دحرجة',dance:'رقص'})[pose] || pose;
+  if (heroMixer) { playHero(previewTimer>0 ? previewHeroClip : mapping[pose] || 'Idle_Loop', previewTimer<=0 && ['jump','land','attack','roll'].includes(pose)); heroMixer.update(dt); applyTraversalPose(dt); }
+  $('avatarState').textContent = ({idle:'وقوف',walk:'مشي',sprint:'جري',jump:'قفز',fall:'سقوط',swing:'تأرجح',climb:'تسلق جدار',land:'هبوط',attack:'هجوم',hit:'إصابة',roll:'دحرجة',dance:'رقص'})[pose] || pose;
 }
+// Stable bone aiming: preserve imported local hierarchy and limb lengths.
+function aimJoint(bone, child, target, weight=1) {
+  if(!bone||!child||!bone.parent)return;
+  creature.updateMatrixWorld(true);
+  const a=bone.getWorldPosition(new THREE.Vector3()),b=child.getWorldPosition(new THREE.Vector3());
+  const from=b.sub(a).normalize(),to=target.clone().sub(a).normalize();
+  if(from.lengthSq()<.5||to.lengthSq()<.5)return;
+  const world=bone.getWorldQuaternion(new THREE.Quaternion());
+  const turn=new THREE.Quaternion().setFromUnitVectors(from,to);
+  const local=bone.parent.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(turn.multiply(world));
+  bone.quaternion.slerp(local,weight);bone.updateMatrixWorld(true);
+}
+function applyTraversalPose(dt) {
+  if(!heroRoot)return;
+  const climb=player.climbing,swing=web.active;
+  heroRoot.rotation.x=damp(heroRoot.rotation.x,swing?-.16:0,8,dt);
+  heroRoot.rotation.z=damp(heroRoot.rotation.z,swing?Math.sin(poseTime*2)*.06:0,8,dt);
+  if(!climb&&!swing)return;
+  creature.updateMatrixWorld(true);
+  for(const [suffix,side] of [['L',-1],['R',1]]) {
+    const upper=heroBones['upper'+suffix],fore=heroBones['fore'+suffix],hand=heroBones['hand'+suffix];
+    if(!upper||!fore||!hand)continue;
+    const shoulder=upper.getWorldPosition(new THREE.Vector3());
+    let target;
+    if(swing){
+      target=shoulder.clone().add(web.anchor.clone().sub(shoulder).normalize().multiplyScalar(.72));
+      target.x+=side*.055;
+    }else{
+      const n=player.wallNormal||{x:0,z:1},wave=Math.sin(poseTime*5+side*Math.PI/2);
+      target=new THREE.Vector3(player.pos.x-n.x*.4+side*n.z*.28,player.pos.y+1.48+wave*.18,player.pos.z-n.z*.4-side*n.x*.28);
+    }
+    // Bent elbow target, then forearm reaches the contact/rope direction.
+    const elbow=shoulder.clone().lerp(target,.52);elbow.y-=.055;
+    aimJoint(upper,fore,elbow,.95);aimJoint(fore,hand,target,.95);
+    if(climb) {
+      const n=player.wallNormal||{x:0,z:1},phase=Math.sin(poseTime*5-side*Math.PI/2);
+      const knee=new THREE.Vector3(player.pos.x+n.x*.05+side*n.z*.2,player.pos.y+.6+phase*.13,player.pos.z+n.z*.05-side*n.x*.2);
+      const foot=knee.clone();foot.y=player.pos.y+.15+phase*.13;foot.x-=n.x*.38;foot.z-=n.z*.38;
+      aimJoint(heroBones['thigh'+suffix],heroBones['shin'+suffix],knee,.85);
+      aimJoint(heroBones['shin'+suffix],heroBones['foot'+suffix],foot,.85);
+    }
+  }
+}
+function updateCityLOD() {
+  if(!cityDetailBatches.length||!fallbackCityMesh)return;
+  const center=mode==='menu'?camera.position:player.pos;
+  const radius=SET.quality==='low'?100:SET.quality==='med'?165:240;
+  const near=b=>Math.hypot(b.x-center.x,b.z-center.z)<radius || b.tower;
+  const m=new THREE.Matrix4();
+  for(const batch of cityDetailBatches) {
+    let n=0;
+    for(const b of batch.matches)if(near(b)) {
+      m.makeScale(b.w/batch.sz.x,b.h/batch.sz.y,b.d/batch.sz.z);m.setPosition(b.x,0,b.z);batch.im.setMatrixAt(n++,m);
+    }
+    batch.im.count=n;batch.im.instanceMatrix.needsUpdate=true;
+    // Static full-city bounding sphere from initial instances stays conservative.
+  }
+  city.buildings.forEach((b,i)=>{
+    if(near(b))m.makeScale(0,0,0);
+    else {m.makeScale(b.w,b.h,b.d);m.setPosition(b.x,b.h/2-.3,b.z);}
+    fallbackCityMesh.setMatrixAt(city.lots.length+i,m);
+  });
+  fallbackCityMesh.instanceMatrix.needsUpdate=true;
+}
+
 async function importCityBlocks() {
   const names = ['a','b','c','d','e','f','g','h','i','j','k','l','m','n','skyscraper-a','skyscraper-b','skyscraper-c','skyscraper-d','skyscraper-e'];
   try {
@@ -1601,13 +1806,14 @@ async function importCityBlocks() {
         if(!o.isMesh || !matches.length) return;
         const geo=o.geometry.clone(); geo.applyMatrix4(o.matrixWorld);
         geo.translate(-center.x,-box.min.y,-center.z);
-        const mat=o.material.clone(); mat.roughness=.7; mat.metalness=.12;
+        const mat=o.material.clone();mat.color.multiplyScalar(.76); mat.roughness=.7; mat.metalness=.12;
         const im=new THREE.InstancedMesh(geo,mat,matches.length), m=new THREE.Matrix4();
         matches.forEach((b,i)=>{m.makeScale(b.w/sz.x,b.h/sz.y,b.d/sz.z);m.setPosition(b.x,0,b.z);im.setMatrixAt(i,m);});
         im.instanceMatrix.needsUpdate=true; im.computeBoundingSphere(); group.add(im);
+        cityDetailBatches.push({im,matches,sz});
       });
     }
-    scene.add(group); fallbackCityMesh.visible=false;
+    scene.add(group); fallbackCityMesh.visible=true;updateCityLOD();
     // Matching sidewalks and clear eight-metre street corridors.
     const walk=new THREE.InstancedMesh(new THREE.BoxGeometry(23,.28,23),new THREE.MeshStandardMaterial({color:0x4b5362,roughness:.95}),city.lots.length);
     const m=new THREE.Matrix4();city.lots.forEach((l,i)=>{m.makeTranslation(l.x,.05,l.z);walk.setMatrixAt(i,m)});scene.add(walk);
@@ -1654,6 +1860,7 @@ function applySettings() {
   rainGeo.setDrawRange(0, rainActive * 2);
   $("fpsBox").classList.toggle("hidden", !SET.showFps);
   if (skyline) skyline.visible = SET.quality !== "low";
+  updateCityLOD();
   $("wActions").style.opacity = touchDevice ? "1" : ".55";
   if (sfxG) sfxG.gain.value = SET.sfx;
   if (musG) musG.gain.value = SET.mus;
@@ -1756,15 +1963,17 @@ function knockDown() {
   }
   player.pos.set(best.x, groundAt(city, best.x, best.z) + .2, best.z);
   player.vel.set(0, 0, 0);
+  player.climbing=false;player.wallCooldown=0;input.climb=false;releaseWeb();
   player.onGround = true;
   hp = 3; invuln = 3;
   combo.n = 0; combo.clock = 0; updateComboHud();
   fxCamShake = .55; fxSlow = .35;
   renderHp(); saveAll();
   sfxDown();
-  toast("سقط لَزِج… نهض في الشارع — البقاء في الأمان يشفيك تدريجيًا");
+  toast("سقط لَزِج… نهض في نقطة آمنة — البقاء في الأمان يشفيك تدريجيًا");
 }
 function damagePlayer(n) {
+  actionTimer=.45;actionKind='hit';
   hp = Math.max(0, hp - n);
   renderHp();
   sfxHit();
@@ -1803,7 +2012,7 @@ function startRace() {
     cps.push(cur);
   }
   ensureRaceRings();
-  race.cps = cps; race.idx = 0; race.t = 52; race.active = true;
+  race.cps = cps; race.idx = 0; race.t = 52; race.elapsed=0; race.active = true;
   for (let i = 0; i < race.rings.length; i++) {
     const r = race.rings[i];
     if (i < cps.length) { r.visible = true; r.position.set(cps[i].x, cps[i].h + 1.4, cps[i].z); }
@@ -1816,10 +2025,11 @@ function startRace() {
 function updateRace(dt) {
   if (!race.active) return;
   race.t -= dt;
+  race.elapsed=(race.elapsed||0)+dt;
   const b = race.cps[race.idx];
   if (b) {
     const d = Math.hypot(player.pos.x - b.x, player.pos.z - b.z);
-    if (d < 3.6 && player.pos.y > b.h - 1.3) {
+    if (d < 3.6 && Math.abs(player.pos.y-(b.h+1.4)) < 3.3) {
       race.idx++;
       race.t += 11;
       score += 100;
@@ -1832,7 +2042,7 @@ function updateRace(dt) {
         race.active = false;
         $("raceHud").classList.add("hidden");
         hideRaceRings();
-        const spent = (52 + 11 * (race.cps.length - 1)) - race.t;
+        const spent = race.elapsed;
         if (!raceBest || spent < raceBest) raceBest = spent;
         score += 250;
         renderScore();
@@ -1942,6 +2152,7 @@ function setPaused(v) {
   $("wPause").textContent = paused ? "▶" : "Ⅱ";
   $("pause").classList.toggle("hidden", !paused);
   if (paused) {
+    clearControls();
     try { document.exitPointerLock(); } catch {}
     $("pauseStats").textContent =
       `القطع ${partsGot}/${PART_TOTAL} • النقاط ${Math.round(score)} • أفضل سباق ${raceBest ? raceBest.toFixed(1) + "ث" : "—"} • حيوية ${hp}/5`;
@@ -1962,6 +2173,9 @@ function resetRun() {
     parts[i].mesh.visible = true;
     parts[i].halo.visible = true;
   }
+  for(const e of enemies){e.alive=true;e.aggro=false;e.mesh.visible=true;if(e.cocoon){scene.remove(e.cocoon);e.cocoon=null;}e.retarget();}
+  for(const f of flecks)fxGroup.remove(f.m);flecks.length=0;
+  if(boss.mesh)boss.mesh.visible=false;
   partsGot = 0;
   mission = "find";
   hp = 5; score = 0; scoreShown = 0;
@@ -1969,6 +2183,7 @@ function resetRun() {
   player.pos.set(46, 0, 120);
   player.pos.y = groundAt(city, player.pos.x, player.pos.z);
   player.vel.set(0, 0, 0);
+  player.climbing=false;player.wallCooldown=0;input.climb=false;releaseWeb();
   player.onGround = true;
   firstPerson = false; creature.visible = true;
   camPitch = 0; camYaw = .3626;
@@ -1981,6 +2196,7 @@ function startRun(fresh) {
   $("wPause").classList.remove("hidden");
   if (fresh) resetRun();
   mode = "play";
+  paused=false;clearControls();
   $("avatarPanel").classList.remove("hidden");
   $("menu").classList.add("hidden");
   $("pause").classList.add("hidden");
@@ -2062,7 +2278,7 @@ importModels();
 window.addEventListener("resize", () => {
   renderer.setSize(innerWidth, innerHeight);
   if (composer) composer.setSize(innerWidth, innerHeight);
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+  applySettings();
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
 });

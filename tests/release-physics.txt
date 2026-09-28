@@ -1,0 +1,8 @@
+t1 tower ground 78 | street 0.3
+t2 anchor: 0.0,79.6,0.0
+t4 nan: 0 | belowGround: 0 | maxSpeed: 14.0
+t5 attached true exceed 28.82 y 79.4
+t7 apex 2.55
+t8 y 14.80 vs 14.80 landed true
+t10 x 345
+OPEN-WORLD PHYSICS OK {"t1":true,"t2":true,"t3":true,"t4":true,"t5":true,"t7":true,"t8":true,"t9":true,"t10":true,"wallAttach":true,"roofMantle":true,"wallJump":true,"releaseWall":true,"noAirClimb":true}

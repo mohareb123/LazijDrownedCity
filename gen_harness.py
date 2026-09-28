@@ -4,7 +4,7 @@ src = open('open_world_script.mjs', encoding='utf-8').read()
 def region(a, b):
     i = src.index(a) + len(a); j = src.index(b, i)
     return src[i:j]
-PRE = """import * as THREE from './three_test.mjs';
+PRE = """import * as THREE from '/home/user/three_test.mjs';
 const clamp = THREE.MathUtils.clamp, lerp = THREE.MathUtils.lerp, damp = THREE.MathUtils.damp;
 const smooth = t => { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); };
 let uiBusy = false, paused = false, landedCount = 0;
@@ -120,6 +120,21 @@ console.log('t2 anchor:', a && a.p.toArray().map(v => v.toFixed(1)).join(','));
   pass.t10 = player.pos.x <= 346 && player.pos.x >= -346;
   console.log('t10 x', player.pos.x);
 }
+// Wall traversal regression tests on tower's east facade.
+{
+  web.active=false;input.climb=true;input.forward=1;input.strafe=0;
+  player.pos.set(13.65,2,0);player.vel.set(0,0,0);player.wallCooldown=0;wantJump=false;
+  stepPlayer(1/60);pass.wallAttach=player.climbing&&player.pos.y>2&&Math.abs(player.pos.x-13.52)<.01;
+  for(let i=0;i<660&&!player.onGround;i++)stepPlayer(1/60);
+  pass.roofMantle=player.onGround&&player.pos.y===TOWER_H&&player.pos.x<13;
+  player.pos.set(13.52,20,0);player.vel.set(0,0,0);player.wallCooldown=0;player.onGround=false;wantJump=true;
+  stepPlayer(1/60);pass.wallJump=!player.climbing&&player.vel.x>6&&player.vel.y>9;
+  input.climb=false;player.pos.set(13.52,20,0);player.vel.set(0,0,0);player.wallCooldown=0;
+  stepPlayer(1/60);pass.releaseWall=!player.climbing&&player.pos.y<20;
+  input.climb=true;player.pos.set(45,2,45);player.vel.set(0,0,0);stepPlayer(1/60);pass.noAirClimb=!player.climbing&&player.vel.y<0;
+  input.climb=false;
+}
+
 const ok = Object.values(pass).every(Boolean);
 console.log(ok ? 'OPEN-WORLD PHYSICS OK' : 'OPEN-WORLD PHYSICS FAILED', JSON.stringify(pass));
 process.exit(ok ? 0 : 1);
