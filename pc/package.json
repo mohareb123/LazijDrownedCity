@@ -1,8 +1,8 @@
 {
   "name": "lazij-drowned-city",
   "productName": "LazijCity",
-  "version": "1.0.0",
-  "description": "Lazij: Drowned City — 3D open-world game",
+  "version": "1.4.0",
+  "description": "Lazij: Drowned City \u2014 3D open-world game",
   "main": "main.js",
   "author": "Arena Agent",
   "license": "MIT",

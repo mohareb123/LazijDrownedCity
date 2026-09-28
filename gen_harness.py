@@ -4,7 +4,7 @@ src = open('open_world_script.mjs', encoding='utf-8').read()
 def region(a, b):
     i = src.index(a) + len(a); j = src.index(b, i)
     return src[i:j]
-PRE = """import * as THREE from '/home/user/three_test.mjs';
+PRE = """import * as THREE from './three_test.mjs';
 const clamp = THREE.MathUtils.clamp, lerp = THREE.MathUtils.lerp, damp = THREE.MathUtils.damp;
 const smooth = t => { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); };
 let uiBusy = false, paused = false, landedCount = 0;

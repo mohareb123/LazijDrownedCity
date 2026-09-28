@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assemble the open-world game into one self-contained offline HTML file."""
+"""Assemble the open-world game into an offline-capable HTML bundle with local model assets."""
 import re
 
 game = open('openworld_game.js', encoding='utf-8').read()

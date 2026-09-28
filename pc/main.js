@@ -1,5 +1,5 @@
 // Lazij: Drowned City — Electron launcher
-const { app, BrowserWindow, Menu, shell, globalShortcut } = require('electron');
+const { app, BrowserWindow, Menu, shell } = require('electron');
 const path = require('path');
 
 // GPU resilience on mixed desktop hardware (fallback to software WebGL if needed)
@@ -25,9 +25,14 @@ function createWindow() {
     }
   });
   win.once('ready-to-show', () => win.show());
+  win.webContents.on('before-input-event', (event, input) => {
+    if(input.type==='keyDown' && input.key==='F11') { event.preventDefault(); win.setFullScreen(!win.isFullScreen()); }
+    // Escape must reach the game's pause handler (never steal it globally).
+    if(input.type==='keyDown' && input.key==='Escape' && win.isFullScreen()) win.setFullScreen(false);
+  });
   win.loadFile(path.join(__dirname, 'index.html'));
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    if(/^https?:\/\//i.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
 }
@@ -35,12 +40,6 @@ function createWindow() {
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   createWindow();
-  globalShortcut.register('F11', () => {
-    if (win) win.setFullScreen(!win.isFullScreen());
-  });
-  globalShortcut.register('Escape', () => {
-    if (win && win.isFullScreen()) win.setFullScreen(false);
-  });
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
