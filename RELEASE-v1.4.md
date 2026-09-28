@@ -39,7 +39,7 @@ WASD الحركة · Shift الجري · Space القفز · E الخيط/الت
 ## البناء والتشغيل
 `python3 build_open.py` ثم `python3 site/serve.py` (المنفذ 8080).
 `python3 gen_harness.py && node harness_openworld.mjs`
-`node shot/releaseqa.js` (بعد تثبيت Puppeteer ومتطلبات Chromium).
+`node tests/browser-release.js` (بعد تثبيت Puppeteer ومتطلبات Chromium).
 `bash pc-game/build_exe.sh` لبناء حزمة Windows x64.
 
 النماذج محفوظة محليًا للعمل دون إنترنت. الحقوق: models/CREDITS.md، وmodels/city/LICENSE.txt، وmodels/hero-LICENSE.txt.
