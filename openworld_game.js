@@ -463,6 +463,7 @@ function stepPlayer(dt) {
   const wasAir = !p.onGround;
   if (p.pos.y <= gh && p.vel.y <= 0) {
     p.pos.y = gh;
+    p.impactSpeed=Math.abs(p.vel.y);
     p.vel.y = 0;
     p.onGround = true;
     if (wasAir) fxLanded();
@@ -483,6 +484,7 @@ function attachWeb() {
   web.active = true;
   web.real = a.real;
   web.t = 0;
+  player.webCasting=.28;
   web.taut = false;
   if (!player.onGround) player.vel.y = Math.max(player.vel.y, 1.2);
   else player.vel.y = 5.2;
@@ -492,6 +494,7 @@ function attachWeb() {
 function releaseWeb() {
   if (!web.active) return;
   web.active = false;
+  player.webReleasing=.28;
   player.vel.y = Math.min(player.vel.y + 2.6, 14);
   if (web.line) web.line.visible = false;
   sfxReel();
@@ -671,33 +674,30 @@ function updateEnemies(dt) {
 }
 
 function shootWeb() {
-  if (uiBusy || paused || fxShootCd > 0) return;
-  actionTimer=.65;actionKind='attack';
+  if(uiBusy||paused||fxShootCd>0||actionKind==='hit'&&actionTimer>0)return;
+  fxShootCd=.52;
+  chooseShotTarget();
+  beginAction('shoot',.52,.16,resolveWebShot);
+}
+function resolveWebShot() {
   sfxShot();
-  fxShootCd = .35;
-  // boss first
-  if (boss.active) {
+  // Target chosen when the cast begins; effect lands at the release frame.
+  if (shotTarget===boss && boss.active) {
     const d = tmpB.copy(boss.pos).sub(player.pos);
     if (d.length() < 36 && player.pos.y > TOWER_H-3) {
       hitBoss();
-      tmpA.copy(player.pos); tmpA.y += 1;
+      tmpA.copy(attackOrigin());
       tmpB.copy(boss.pos); tmpB.y += 1.4;
       spawnShotLine(tmpA, tmpB);
       return;
     }
   }
-  let best = null, bestD = 1e9;
-  for (const e of enemies) {
-    if (!e.alive) continue;
-    const d = tmpA.copy(e.pos).sub(player.pos);
-    const dl = d.length();
-    if (dl < 32 && dl > 3 && d.y > -2 && dl < bestD) { bestD = dl; best = e; }
-  }
+  const best=shotTarget!==boss && shotTarget?.alive && shotTarget.pos.distanceTo(player.pos)<34 ? shotTarget : null;
   if (best) {
     best.alive = false;
     best.mesh.visible = false;
-    tmpA.copy(player.pos); tmpA.y += 1;
-    spawnShotLine(tmpA, best.pos);
+    tmpA.copy(attackOrigin());
+    tmpB.copy(best.pos);tmpB.y+=1;spawnShotLine(tmpA,tmpB);
     const cocoon = new THREE.Mesh(
       new THREE.IcosahedronGeometry(.44, 0),
       new THREE.MeshStandardMaterial({ color: "#e8eef8", roughness: .8 })
@@ -713,8 +713,8 @@ function shootWeb() {
     if (combo.n === 3) toast("كومبو ×3! المطاردات تتعلم الخوف");
     if (combo.n === 6) toast("ستة شرانق… المدينة تتنفس الصعداء");
   } else {
-    tmpA.copy(player.pos); tmpA.y += 1;
-    tmpB.copy(fwdVec).multiplyScalar(9).add(tmpA);
+    tmpA.copy(attackOrigin());
+    tmpB.copy(shotAim);
     spawnShotLine(tmpA, tmpB);
   }
 }
@@ -736,6 +736,7 @@ let fxSlow = 1;
 let fxCamShake = 0;
 
 function updateFx(dt) {
+  for(const e of enemies)if(!e.alive&&e.reactionTime>0&&e.mix){e.mix.update(dt);e.reactionTime-=dt;}
   if (combo.clock > 0) {
     combo.clock -= dt;
     if (combo.clock <= 0) { combo.n = 0; updateComboHud(); }
@@ -951,9 +952,9 @@ window.addEventListener("keydown", e => {
   if (paused || uiBusy) return;
   if (e.code === "KeyQ") { input.climb=true; e.preventDefault(); }
   if (e.code === "KeyC" && !e.repeat) { switchAvatar(); return; }
-  if (e.code === "KeyR" && !e.repeat && player.onGround && actionTimer<=0) { actionTimer = .9; actionKind = 'roll'; invuln=Math.max(invuln,.4); player.vel.addScaledVector(fwdVec,5); return; }
-  if (e.code === "KeyT" && !e.repeat) { actionTimer = 3; actionKind = 'dance'; return; }
-  if (e.code === "KeyF" && !e.repeat) { actionTimer = .65; actionKind = 'attack'; }
+  if (e.code === "KeyR" && !e.repeat && player.onGround && actionTimer<=0) { beginAction('roll',.9); invuln=Math.max(invuln,.4); player.vel.addScaledVector(fwdVec,5); return; }
+  if (e.code === "KeyT" && !e.repeat) { beginAction('dance',3); return; }
+  if (e.code === "KeyJ" && !e.repeat) { meleeAttack(); return; }
   if (e.code === "KeyW" || e.code === "ArrowUp") keys.up = true;
   if (e.code === "KeyS" || e.code === "ArrowDown") keys.down = true;
   if (e.code === "KeyA" || e.code === "ArrowLeft") keys.left = true;
@@ -1015,6 +1016,7 @@ function bindHold(id, down, up) {
   b.addEventListener("pointercancel", () => up && up());
 }
 bindHold("wJump", () => { wantJump = true; });
+bindHold("wMelee",meleeAttack);
 bindHold("wClimb", () => {input.climb=true;}, () => {input.climb=false;});
 bindHold("wWeb", attachWeb, releaseWeb);
 bindHold("wShoot", shootWeb);
@@ -1275,7 +1277,7 @@ $("wBack").addEventListener("click", () => {
 const INTRO = [
   ["مدينة تحت المطر", "بعد معارك الجزر، قاد أثرُ النول الكبير لَزِجَ إلى المدينة الغارقة: ناطحاتٌ لا تنام، أزقةٌ يزحف فيها جنودُ الملك الأسود، وسطحٌ لكل قصة هرب."],
   ["حكمة نَسْمة", "همست الجدة عبر خيطٍ قديم: «هذه المدينة لا تحتاج فاتحًا يا حفيدي، بل من يمرّ في سمائها. أرجل حادة، قلب ليّن… وصبرٌ في التأرجح»."],
-  ["المهمة", "اثنتا عشرة قطعة من النول الكبير متناثرة على الأسطح. اجمع ثمانيًا وسيصعد الملك نفسه إلى أعلى برج. على الكمبيوتر: انقر بالماوس لقفل النظر — WASD حركة، Space قفز، E أو الزر الأيمن تأرجح، F أو الزر الأيسر شبكة، Shift جري، Q تسلق وS نزول أثناء التسلق، C تبديل الشخصية، R دحرجة، T رقصة، V المنظور، M سباق الأسطح، ESC إيقاف."]
+  ["المهمة", "اثنتا عشرة قطعة من النول الكبير متناثرة على الأسطح. اجمع ثمانيًا وسيصعد الملك نفسه إلى أعلى برج. على الكمبيوتر: انقر بالماوس لقفل النظر — WASD حركة، Space قفز، E أو الزر الأيمن تأرجح، F أو الزر الأيسر شبكة، Shift جري، Q تسلق وS نزول أثناء التسلق، J ضربة قريبة، C تبديل الشخصية، R دحرجة، T رقصة، V المنظور، M سباق الأسطح، ESC إيقاف."]
 ];
 const ENDING = [
   ["سقوط الملك", "عندما ارتطمت الشبكة الثالثة بصدره، ترجّح الملك الأسود من فوق البرج كجبلٍ من القار، وذاب قبل أن يلمس الأرض. غسل المطرُ نيون المدينة، ولأول مرة منذ سنين… صارت الأبراج لامعة لا مرعِبة."],
@@ -1333,7 +1335,12 @@ let heroRoot = null, heroMixer = null, heroActions = {}, heroAction = '', avatar
 let actionTimer = 0, actionKind = '', lastGrounded = false, previewHeroClip = '', previewTimer = 0;
 let heroBones = {}, poseTime=0, saveClock=0, lodClock=0;
 const cityDetailBatches=[];
-let wallPoseBlend=0;
+let wallPoseBlend=0, wallGaitClock=0;
+let actionDuration=0, actionAge=0, actionImpact=-1, actionCallback=null;
+let animationSerial=0, heroEventSerial=-1, activePose='idle', meleeSide=0;
+let shotTarget=null;
+const shotAim=new THREE.Vector3();
+const spiderAccents=[];
 const originalCreatureParts = [...creature.children];
 let robotTmpl = null, robotClips = {}, bossTmpl = null, bossClips = {}, skyline = null;
 const resumed = loadAll();
@@ -1484,7 +1491,7 @@ function attachRobot(e) {
     scene.add(wrap);
     e.mix = new THREE.AnimationMixer(clone);
     e.acts = {};
-    for (const name of ["Idle", "Walking", "Running"]) {
+    for (const name of ["Idle", "Walking", "Running", "Death"]) {
       if (robotClips[name]) { const a = e.mix.clipAction(robotClips[name]); a.enabled = false; a.setLoop(THREE.LoopRepeat, Infinity); e.acts[name] = a; }
     }
     if (e.acts.Idle) { e.acts.Idle.enabled = true; e.acts.Idle.play(); e.robotClip = "Idle"; }
@@ -1585,6 +1592,7 @@ async function importModels() {
     importedSpider = wrap;
     spiderMixer = new THREE.AnimationMixer(root);
     for (const clip of g.animations) spiderMixer.clipAction(clip).play();
+    root.traverse(o=>{if(o.isBone && /Bone.?00[246]/.test(o.name))spiderAccents.push({bone:o,base:o.quaternion.clone()});});
     importReport.spider = countBones(root);
     toast(`عنكبوت آلي مستورد: ${importReport.spider} عظمة، ${skins} أجزاء مربوطة بالعظام`);
   } catch (err) { console.warn("spider import:", err.message); }
@@ -1670,7 +1678,7 @@ async function importHero() {
     heroMixer = new THREE.AnimationMixer(model);
     for (const clip of g.animations) heroActions[clip.name] = heroMixer.clipAction(clip);
     // Separate author-created base clips for wall/swing; upper limbs are driven by IK below.
-    for(const [name,base] of [['WebSwing','Idle_Loop'],['WallClimb','Crouch_Idle_Loop']]) {
+    for(const [name,base] of [['WebSwing','Idle_Loop'],['WallClimb','Crouch_Idle_Loop'],['WallDescend','Crouch_Idle_Loop'],['WebShoot','Pistol_Aim_Neutral'],['WebCast','Idle_Loop'],['WebRelease','Jump_Loop'],['AirFall','Jump_Loop'],['HardLanding','Jump_Land'],['TurnIdle','Idle_Loop']]) {
       const clip=g.animations.find(c=>c.name===base).clone();clip.name=name;
       heroActions[name]=heroMixer.clipAction(clip);
     }
@@ -1678,7 +1686,7 @@ async function importHero() {
     heroRoot.visible=avatar==='hero';if(importedSpider)importedSpider.visible=avatar==='spider';
     $('avatarSwitch').textContent=avatar==='hero'?'C • نَسّاج':'C • العنكبوت';
     $('avatarSwitch').disabled = false;
-    const names={Idle_Loop:'وقوف',Walk_Loop:'مشي',Sprint_Loop:'جري سريع',Jog_Fwd_Loop:'هرولة',Jump_Start:'بدء القفز',Jump_Land:'هبوط',Jump_Loop:'في الهواء',Roll:'دحرجة',Dance_Loop:'رقص',Punch_Cross:'لكمة',Crouch_Idle_Loop:'قرفصاء'};
+    const names={Idle_Loop:'وقوف',Walk_Loop:'مشي',Sprint_Loop:'جري سريع',Jog_Fwd_Loop:'هرولة',Jump_Start:'بدء القفز',Jump_Land:'هبوط',Jump_Loop:'في الهواء',Roll:'دحرجة',Dance_Loop:'رقص',Punch_Cross:'لكمة',Crouch_Idle_Loop:'قرفصاء',WebShoot:'إطلاق شبكة',WebCast:'إرسال خيط التأرجح',WebRelease:'إفلات الخيط',WebSwing:'تأرجح',WallClimb:'صعود الجدار',WallDescend:'نزول الجدار',AirFall:'سقوط',HardLanding:'هبوط قوي',TurnIdle:'التفات',Punch_Jab:'لكمة يسار',Punch_Cross:'لكمة يمين',Hit_Chest:'تلقي ضربة'};
     for(const name of Object.keys(heroActions)) { const opt=document.createElement('option');opt.value=name;opt.textContent=names[name] || name.replaceAll('_',' ');$('animationSelect').appendChild(opt); }
     $('animationSelect').onchange=()=>{if(avatar!=='hero')switchAvatar();previewHeroClip=$('animationSelect').value;previewTimer=5;};
     toast('شخصية بشرية CC0 جاهزة • C للتبديل • R دحرجة • T رقصة • F هجوم');
@@ -1689,45 +1697,149 @@ function switchAvatar() {
   avatar = avatar === 'spider' ? 'hero' : 'spider';
   heroRoot.visible = avatar === 'hero'; importedSpider.visible = avatar === 'spider';
   for (const part of originalCreatureParts) part.visible = false;
-  actionTimer = 0;
+  cancelAction();
   updateAvatar(0);
   $('avatarSwitch').textContent = avatar === 'hero' ? 'C • نَسّاج' : 'C • العنكبوت';
   saveAll();
   toast(avatar === 'hero' ? 'البطل البشري — نفس المكان والتقدم' : 'العنكبوت الآلي — نفس المكان والتقدم');
 }
-function playHero(name, once=false) {
-  if (!heroActions[name] || heroAction === name) return;
-  if (heroActions[heroAction]) heroActions[heroAction].fadeOut(.18);
-  const act = heroActions[name]; act.reset().setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, once ? 1 : Infinity);
-  act.clampWhenFinished = once; act.fadeIn(.18).play(); heroAction = name;
+// Animation events own their timing. Effects fire at the release/contact frame.
+function cancelAction() {
+  actionTimer=0;actionDuration=0;actionAge=0;actionImpact=-1;actionCallback=null;
+}
+function beginAction(kind,duration,impact=-1,callback=null) {
+  actionKind=kind;actionTimer=duration;actionDuration=duration;actionAge=0;
+  actionImpact=impact;actionCallback=callback;animationSerial++;
+}
+function attackOrigin() {
+  creature.updateMatrixWorld(true);
+  if(avatar==='hero' && heroBones.handR) {
+    const hand=activePose==='punchL'?heroBones.handL:heroBones.handR;
+    return hand.getWorldPosition(new THREE.Vector3());
+  }
+  if(importedSpider)return importedSpider.localToWorld(new THREE.Vector3(0,.68,-.62));
+  return player.pos.clone().add(new THREE.Vector3(0,1,0));
+}
+function chooseShotTarget() {
+  shotTarget=null;
+  const forward=new THREE.Vector3(-Math.sin(player.heading),0,-Math.cos(player.heading));
+  let best=33;
+  for(const e of enemies) {
+    const d=e.pos.clone().sub(player.pos),flat=Math.hypot(d.x,d.z);
+    if(e.alive && d.length()<best && Math.abs(d.y)<12 && (flat<2 || forward.dot(d.clone().setY(0).normalize())>-.1)) {shotTarget=e;best=d.length();}
+  }
+  if(boss.active && player.pos.y>TOWER_H-3 && player.pos.distanceTo(boss.pos)<36)shotTarget=boss;
+  if(shotTarget)shotAim.copy(shotTarget.pos).add(new THREE.Vector3(0,1.25,0));
+  else shotAim.copy(player.pos).addScaledVector(forward,12).add(new THREE.Vector3(0,1.25,0));
+}
+function meleeAttack() {
+  if(uiBusy||paused||player.climbing||actionTimer>0 && ['punchL','punchR','shoot','hit','recover'].includes(actionKind))return;
+  meleeSide=1-meleeSide;
+  beginAction(meleeSide?'punchR':'punchL',.62,.23,resolveMeleeHit);
+}
+function resolveMeleeHit() {
+  const forward=new THREE.Vector3(-Math.sin(player.heading),0,-Math.cos(player.heading));
+  let victim=null,distance=2.8;
+  for(const e of enemies) {
+    const d=e.pos.clone().sub(player.pos),flat=Math.hypot(d.x,d.z);
+    if(e.alive && Math.abs(d.y)<2 && flat<distance && (flat<.4||forward.dot(d.clone().setY(0).normalize())>0)) {victim=e;distance=flat;}
+  }
+  if(boss.active && player.pos.y>TOWER_H-3 && player.pos.distanceTo(boss.pos)<4) {hitBoss();return;}
+  if(!victim) {tone(160,80,.08,'sine',.05);return;}
+  victim.alive=false;victim.robotClip='';
+  if(victim.mix && robotClips.Death) {
+    victim.mix.stopAllAction();
+    const fall=victim.mix.clipAction(robotClips.Death).reset().setLoop(THREE.LoopOnce,1);
+    fall.clampWhenFinished=true;fall.timeScale=1.4;fall.play();
+    victim.reactionTime=robotClips.Death.duration/1.4+.1;
+  } else victim.mesh.visible=false;
+  burst(victim.pos.x,victim.pos.y+1,victim.pos.z,7,eyeMaterial);
+  score+=50;combo.n++;combo.clock=3;updateComboHud();renderScore();sfxHit();fxCamShake=.1;
+}
+function playHero(name,once=false,force=false) {
+  if(!heroActions[name] || heroAction===name&&!force)return;
+  if(heroActions[heroAction] && heroAction!==name)heroActions[heroAction].fadeOut(.12);
+  const act=heroActions[name];act.enabled=true;act.reset().setLoop(once?THREE.LoopOnce:THREE.LoopRepeat,once?1:Infinity);
+  act.clampWhenFinished=once;act.fadeIn(.12).play();heroAction=name;
+  // One-shot clip and gameplay contact use the same duration.
+  if(once && actionTimer>0 && actionDuration>0)act.timeScale=act.getClip().duration/actionDuration;
+  else act.timeScale=1;
 }
 function updateAvatar(dt) {
   poseTime+=dt;
-  const speedNow = Math.hypot(player.vel.x, player.vel.z);
-  if(actionKind==='dance'&&speedNow>.8)actionTimer=0;
-  if (player.onGround && !lastGrounded) { actionTimer = .32; actionKind = 'land'; }
-  lastGrounded = player.onGround;
-  actionTimer = Math.max(0, actionTimer - dt);
-  let pose = player.climbing ? 'climb' : web.active ? 'swing' : !player.onGround ? (player.vel.y > 0 ? 'jump' : 'fall') : speedNow > 10 ? 'sprint' : speedNow > .6 ? 'walk' : 'idle';
-  if (actionTimer > 0 && player.onGround) pose = actionKind;
-  wallPoseBlend=damp(wallPoseBlend,player.climbing?1:0,12,dt);
-  if (importedSpider) {
-    for (const part of originalCreatureParts) part.visible = false;
-    importedSpider.visible = avatar === 'spider';
-    // One baked timeline keeps all six rigid leg rigs synchronized. No grow/melt.
-    if (spiderMixer) spiderMixer.update((player.climbing ? 1.1 : player.onGround ? speedNow * .075 : .12) * dt);
-    importedSpider.rotation.x = damp(importedSpider.rotation.x, pose === 'climb' ? -Math.PI/2 : pose === 'swing' ? -.55 : pose === 'jump' ? -.25 : pose === 'land' ? .18 : 0, 9, dt);
-    const phase = performance.now()*.008;
-    importedSpider.position.y = damp(importedSpider.position.y, pose === 'land' ? -.18 : pose === 'dance' ? .1+Math.sin(phase)*.1 : pose === 'idle' ? Math.sin(phase*.25)*.035 : 0, 9, dt);
-    importedSpider.rotation.z = pose === 'roll' ? (1-actionTimer/.9)*Math.PI*2 : pose === 'dance' ? Math.sin(phase)*.16 : 0;
-    importedSpider.position.z = pose === 'climb' ? .1 : pose === 'attack' ? -Math.sin((1-actionTimer/.65)*Math.PI)*.5 : 0;
+  const speedNow=Math.hypot(player.vel.x,player.vel.z);
+  if(actionKind==='dance' && speedNow>.8)cancelAction();
+  if(player.onGround&&!lastGrounded && !(actionTimer>0&&['shoot','punchL','punchR','hit','recover'].includes(actionKind))) {
+    beginAction(player.impactSpeed>16?'landHard':'land',player.impactSpeed>16?.65:.32);
   }
-  const mapping = {idle:'Idle_Loop',walk:'Walk_Loop',sprint:'Sprint_Loop',jump:'Jump_Start',fall:'Jump_Loop',swing:'WebSwing',climb:'WallClimb',land:'Jump_Land',attack:'Punch_Cross',hit:'Hit_Chest',roll:'Roll',dance:'Dance_Loop'};
-  previewTimer = Math.max(0,previewTimer-dt);
-  if(speedNow>.8 || !player.onGround) previewTimer=0;
-  if (heroMixer) { playHero(previewTimer>0 ? previewHeroClip : mapping[pose] || 'Idle_Loop', previewTimer<=0 && ['jump','land','attack','roll'].includes(pose)); heroMixer.update(dt); applyTraversalPose(dt); }
-  $('avatarState').textContent = ({idle:'وقوف',walk:'مشي',sprint:'جري',jump:'قفز',fall:'سقوط',swing:'تأرجح',climb:'تسلق جدار',land:'هبوط',attack:'هجوم',hit:'إصابة',roll:'دحرجة',dance:'رقص'})[pose] || pose;
+  lastGrounded=player.onGround;
+  if(actionTimer>0){actionAge+=dt;actionTimer=Math.max(0,actionDuration-actionAge);}
+  player.webCasting=Math.max(0,(player.webCasting||0)-dt);
+  player.webReleasing=Math.max(0,(player.webReleasing||0)-dt);
+  let pose=player.climbing?(player.vel.y<-.1?'descend':Math.abs(player.vel.y)<.1?'wallIdle':'climb'):
+    web.active?(player.webCasting>0?'cast':'swing'):
+    !player.onGround?(player.webReleasing>0?'release':player.vel.y>1?'jump':'fall'):
+    speedNow>10?'sprint':speedNow>.6?'walk':Math.abs(input.strafe)>.1?'turn':'idle';
+  if(actionTimer>0)pose=actionKind;
+  activePose=pose;
+  if(player.climbing)wallGaitClock+=dt*(player.vel.y<-.1?-5:player.vel.y>.1?5:0);
+  const mapping={idle:'Idle_Loop',turn:'TurnIdle',walk:'Walk_Loop',sprint:'Sprint_Loop',jump:'Jump_Start',fall:'AirFall',cast:'WebCast',release:'WebRelease',swing:'WebSwing',climb:'WallClimb',descend:'WallDescend',wallIdle:'Crouch_Idle_Loop',land:'Jump_Land',landHard:'HardLanding',shoot:'WebShoot',punchL:'Punch_Jab',punchR:'Punch_Cross',hit:'Hit_Chest',recover:'Jump_Land',roll:'Roll',dance:'Dance_Loop'};
+  previewTimer=Math.max(0,previewTimer-dt);
+  if(speedNow>.8||!player.onGround||actionTimer>0)previewTimer=0;
+  if(importedSpider)updateSpiderAnimation(dt,pose,speedNow);
+  if(heroMixer) {
+    const once=['land','landHard','shoot','punchL','punchR','hit','recover','roll'].includes(pose);
+    const restart=actionTimer>0 && heroEventSerial!==animationSerial;
+    playHero(previewTimer>0?previewHeroClip:mapping[pose]||'Idle_Loop',previewTimer<=0&&once,restart);
+    if(restart)heroEventSerial=animationSerial;
+    heroMixer.update(dt);
+    applyTraversalPose(dt,pose);
+    applyHeroActionPose(pose);
+  }
+  creature.updateMatrixWorld(true);
+  if(actionCallback && actionImpact>=0 && actionAge>=actionImpact) {
+    const fn=actionCallback;actionCallback=null;actionImpact=-1;fn();
+  }
+  $('avatarState').textContent=({idle:'وقوف',turn:'التفات',walk:'مشي',sprint:'جري',jump:'قفز',fall:'سقوط',cast:'إرسال خيط',release:'إفلات الخيط',swing:'تأرجح',climb:'صعود الجدار',descend:'نزول الجدار',wallIdle:'تعلق بالجدار',land:'هبوط خفيف',landHard:'هبوط قوي',shoot:'إطلاق شبكة',punchL:'لكمة يسار',punchR:'لكمة يمين',hit:'تلقي ضربة',recover:'نهوض',roll:'تفادٍ',dance:'رقص'})[pose]||pose;
 }
+function updateSpiderAnimation(dt,pose,speedNow) {
+  for(const part of originalCreatureParts)part.visible=false;
+  importedSpider.visible=avatar==='spider';
+  for(const a of spiderAccents)a.bone.quaternion.copy(a.base);
+  const wall=['climb','descend','wallIdle'].includes(pose);
+  if(spiderMixer)spiderMixer.update((wall?(pose==='descend'?-1.1:1.1):player.onGround?speedNow*.075:.12)*dt);
+  for(const a of spiderAccents)a.base.copy(a.bone.quaternion);
+  const t=actionDuration>0?clamp(actionAge/actionDuration,0,1):0;
+  const pulse=Math.sin(t*Math.PI),punch=pose==='punchL'||pose==='punchR';
+  const fold=pose==='fall'?.15:pose==='landHard'?-.22*pulse:pose==='shoot'?.09*pulse:punch?.14*pulse:pose==='jump'?.09:0;
+  spiderAccents.forEach((a,i)=>a.bone.rotateX(fold*(i%2?1:-1)));
+  importedSpider.rotation.x=damp(importedSpider.rotation.x,wall?-Math.PI/2:pose==='swing'||pose==='cast'?-.55:pose==='jump'?-.25:pose==='fall'?.24:pose==='landHard'?.25*pulse:punch?-.16*pulse:0,12,dt);
+  const phase=poseTime*8;
+  importedSpider.position.y=damp(importedSpider.position.y,pose==='landHard'?-.24*pulse:pose==='land'?-.1*pulse:pose==='dance'?.1+Math.sin(phase)*.1:pose==='idle'?Math.sin(phase*.25)*.035:0,12,dt);
+  importedSpider.rotation.z=pose==='roll'?t*Math.PI*2:pose==='dance'?Math.sin(phase)*.16:pose==='hit'?Math.sin(t*Math.PI*3)*.14:0;
+  importedSpider.position.z=wall?.1:punch?-.55*pulse:pose==='shoot'?Math.sin(t*Math.PI*2)*.08:pose==='hit'?.22*pulse:0;
+}
+function applyHeroActionPose(pose) {
+  const t=actionDuration>0?clamp(actionAge/actionDuration,0,1):0,pulse=Math.sin(t*Math.PI);
+  if(pose==='shoot') {
+    if(shotTarget && (shotTarget===boss?boss.active:shotTarget.alive))shotAim.copy(shotTarget.pos).add(new THREE.Vector3(0,1.25,0));
+    const shoulder=heroBones.upperR?.getWorldPosition(new THREE.Vector3());
+    if(shoulder){const target=shoulder.clone().add(shotAim.clone().sub(shoulder).normalize().multiplyScalar(.72));const elbow=shoulder.clone().lerp(target,.5);elbow.y-=.08;aimJoint(heroBones.upperR,heroBones.foreR,elbow);aimJoint(heroBones.foreR,heroBones.handR,target);}
+  }
+  if(pose==='fall'||pose==='release') {
+    for(const [side,sign] of [['L',-1],['R',1]]) {
+      const arm=heroBones['upper'+side];if(!arm)continue;
+      const shoulder=arm.getWorldPosition(new THREE.Vector3());
+      const target=shoulder.clone().add(new THREE.Vector3(sign*.48,.22,-.12).applyAxisAngle(UP,player.heading));
+      aimJoint(arm,heroBones['fore'+side],target,.7);
+    }
+  }
+  if(pose==='landHard') {
+    heroRoot.position.y=-.15*pulse;heroRoot.rotation.x=.3*pulse;
+  }else heroRoot.position.y=0;
+  // Punch/crouch/hit motion comes from the imported skeletal clips, not a root-only substitute.
+}
+
 // Stable bone aiming: preserve imported local hierarchy and limb lengths.
 function aimJoint(bone, child, target, weight=1) {
   if(!bone||!child||!bone.parent)return;
@@ -1740,9 +1852,9 @@ function aimJoint(bone, child, target, weight=1) {
   const local=bone.parent.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(turn.multiply(world));
   bone.quaternion.slerp(local,weight);bone.updateMatrixWorld(true);
 }
-function applyTraversalPose(dt) {
+function applyTraversalPose(dt,pose=activePose) {
   if(!heroRoot)return;
-  const climb=player.climbing,swing=web.active;
+  const climb=['climb','descend','wallIdle'].includes(pose),swing=['swing','cast'].includes(pose);
   heroRoot.rotation.x=damp(heroRoot.rotation.x,swing?-.16:0,8,dt);
   heroRoot.rotation.z=damp(heroRoot.rotation.z,swing?Math.sin(poseTime*2)*.06:0,8,dt);
   if(!climb&&!swing)return;
@@ -1756,14 +1868,14 @@ function applyTraversalPose(dt) {
       target=shoulder.clone().add(web.anchor.clone().sub(shoulder).normalize().multiplyScalar(.72));
       target.x+=side*.055;
     }else{
-      const n=player.wallNormal||{x:0,z:1},wave=Math.sin(poseTime*5+side*Math.PI/2);
+      const n=player.wallNormal||{x:0,z:1},wave=Math.sin(wallGaitClock+side*Math.PI/2);
       target=new THREE.Vector3(player.pos.x-n.x*.4+side*n.z*.28,player.pos.y+1.48+wave*.18,player.pos.z-n.z*.4-side*n.x*.28);
     }
     // Bent elbow target, then forearm reaches the contact/rope direction.
     const elbow=shoulder.clone().lerp(target,.52);elbow.y-=.055;
     aimJoint(upper,fore,elbow,.95);aimJoint(fore,hand,target,.95);
     if(climb) {
-      const n=player.wallNormal||{x:0,z:1},phase=Math.sin(poseTime*5-side*Math.PI/2);
+      const n=player.wallNormal||{x:0,z:1},phase=Math.sin(wallGaitClock-side*Math.PI/2);
       const knee=new THREE.Vector3(player.pos.x+n.x*.05+side*n.z*.2,player.pos.y+.6+phase*.13,player.pos.z+n.z*.05-side*n.x*.2);
       const foot=knee.clone();foot.y=player.pos.y+.15+phase*.13;foot.x-=n.x*.38;foot.z-=n.z*.38;
       aimJoint(heroBones['thigh'+suffix],heroBones['shin'+suffix],knee,.85);
@@ -1955,6 +2067,7 @@ function renderHp() { $("wHp").textContent = "❤".repeat(hp) + "🖤".repeat(5 
 function renderScore() { $("wScore").textContent = Math.round(score); }
 function healPlayer(n) { hp = Math.min(5, hp + n); renderHp(); }
 function knockDown() {
+  beginAction('recover',.95);
   releaseWeb();
   let best = city.lots[0], bd = 1e9;
   for (const l of city.lots) {
@@ -1963,7 +2076,7 @@ function knockDown() {
   }
   player.pos.set(best.x, groundAt(city, best.x, best.z) + .2, best.z);
   player.vel.set(0, 0, 0);
-  player.climbing=false;player.wallCooldown=0;input.climb=false;releaseWeb();
+  player.climbing=false;player.wallCooldown=0;input.climb=false;releaseWeb();player.vel.set(0,0,0);player.webCasting=0;player.webReleasing=0;
   player.onGround = true;
   hp = 3; invuln = 3;
   combo.n = 0; combo.clock = 0; updateComboHud();
@@ -1973,7 +2086,7 @@ function knockDown() {
   toast("سقط لَزِج… نهض في نقطة آمنة — البقاء في الأمان يشفيك تدريجيًا");
 }
 function damagePlayer(n) {
-  actionTimer=.45;actionKind='hit';
+  beginAction('hit',.45);
   hp = Math.max(0, hp - n);
   renderHp();
   sfxHit();
@@ -2168,12 +2281,13 @@ function onPlayResumed() {
   }
 }
 function resetRun() {
+  cancelAction();lastGrounded=false;player.webCasting=0;player.webReleasing=0;
   for (let i = 0; i < parts.length; i++) {
     parts[i].taken = false;
     parts[i].mesh.visible = true;
     parts[i].halo.visible = true;
   }
-  for(const e of enemies){e.alive=true;e.aggro=false;e.mesh.visible=true;if(e.cocoon){scene.remove(e.cocoon);e.cocoon=null;}e.retarget();}
+  for(const e of enemies){e.reactionTime=0;if(e.mix)e.mix.stopAllAction();e.robotClip='';e.alive=true;e.aggro=false;e.mesh.visible=true;if(e.cocoon){scene.remove(e.cocoon);e.cocoon=null;}e.retarget();}
   for(const f of flecks)fxGroup.remove(f.m);flecks.length=0;
   if(boss.mesh)boss.mesh.visible=false;
   partsGot = 0;
@@ -2183,7 +2297,7 @@ function resetRun() {
   player.pos.set(46, 0, 120);
   player.pos.y = groundAt(city, player.pos.x, player.pos.z);
   player.vel.set(0, 0, 0);
-  player.climbing=false;player.wallCooldown=0;input.climb=false;releaseWeb();
+  player.climbing=false;player.wallCooldown=0;input.climb=false;releaseWeb();player.vel.set(0,0,0);player.webCasting=0;player.webReleasing=0;
   player.onGround = true;
   firstPerson = false; creature.visible = true;
   camPitch = 0; camYaw = .3626;
@@ -2192,6 +2306,7 @@ function resetRun() {
   try { localStorage.removeItem("lazij-open"); } catch {}
 }
 function startRun(fresh) {
+  cancelAction();
   initAudio();
   $("wPause").classList.remove("hidden");
   if (fresh) resetRun();

@@ -113,7 +113,7 @@ html = '''<!DOCTYPE html>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='25' font-size='26'%3E🕷%3C/text%3E%3C/svg%3E">
 <meta name="theme-color" content="#0a0e1c">
-<title>لَزِج — نَسّاج المدينة | v1.4</title>
+<title>لَزِج — نَسّاج المدينة | v1.5</title>
 <style>
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #0a0e1c;
@@ -211,6 +211,7 @@ h1 { margin: 8px 0 4px; font-size: clamp(26px, 7vw, 34px); letter-spacing: -1px;
   padding: 8px 16px; border-radius: 14px; background: rgba(13,17,30,.9); color: #9fb4dd;
   font-size: 12.5px; font-weight: 800; pointer-events: none; border: 1px solid rgba(120,160,255,.3); }
 #menu .mcard::-webkit-scrollbar { width: 8px; } #menu .mcard::-webkit-scrollbar-thumb { background: #2a3854; border-radius: 8px; }
+@media(max-width:850px){#avatarPanel{bottom:94px!important;max-width:calc(100% - 32px)}#wActions{bottom:14px!important;right:12px!important;gap:6px!important}.ability{width:48px!important;height:48px!important}#wJump{width:56px!important;height:56px!important}}
 </style>
 </head>
 <body>
@@ -226,7 +227,7 @@ h1 { margin: 8px 0 4px; font-size: clamp(26px, 7vw, 34px); letter-spacing: -1px;
   </div>
   <div class="pill"><span id="wArrow">▲</span><span id="wDist">0م</span><span id="wMission">اجمع قطع النول من الأسطح</span></div>
 </div>
-<div id="avatarPanel" class="hidden" style="position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:6;background:#d9e4f2;color:#192536;border-radius:16px;padding:10px 18px;font-size:13px;text-align:center"><button id="avatarSwitch" disabled style="background:#b9cfea;padding:8px 16px;border-radius:10px;color:#18283d">C • العنكبوت</button> <span id="avatarState">وقوف</span><div>Q تسلق · Space قفزة من الجدار · R دحرجة</div><div id="assetStatus" style="font-size:11px;color:#52657a">تحميل الشخصيات والأحياء…</div><details><summary>معرض الحركات — للتجربة فقط</summary><select id="animationSelect" aria-label="استعراض حركة" style="max-width:220px;padding:7px;border:0;border-radius:8px"><option value="Idle_Loop">اختيار حركة</option></select></details></div>
+<div id="avatarPanel" class="hidden" style="position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:6;background:#d9e4f2;color:#192536;border-radius:16px;padding:10px 18px;font-size:13px;text-align:center"><button id="avatarSwitch" disabled style="background:#b9cfea;padding:8px 16px;border-radius:10px;color:#18283d">C • العنكبوت</button> <span id="avatarState">وقوف</span><div>F إطلاق شبكة · J لكمة · Q تسلق · Q+S نزول</div><div>Space قفز · R تفادٍ · C تبديل</div><div id="assetStatus" style="font-size:11px;color:#52657a">تحميل الشخصيات والأحياء…</div><details><summary>معرض الحركات — للتجربة فقط</summary><select id="animationSelect" aria-label="استعراض حركة" style="max-width:220px;padding:7px;border:0;border-radius:8px"><option value="Idle_Loop">اختيار حركة</option></select></details></div>
 <button id="wPause" aria-label="إيقاف">Ⅱ</button>
 <div id="bossWrap" class="hidden"><span>الملك الأسود</span><span id="bossPips">●●●</span></div>
 <div id="wToast"></div>
@@ -237,6 +238,7 @@ h1 { margin: 8px 0 4px; font-size: clamp(26px, 7vw, 34px); letter-spacing: -1px;
 <div id="lockHint" class="hidden">🖱️ انقر لقفل الماوس والنظر حولك • ESC للإيقاف المؤقت</div>
 <div id="fpsBox" class="hidden">–</div>
 <div id="wActions">
+  <button class="ability" id="wMelee" aria-label="ضربة قريبة">✊</button>
   <button class="ability" id="wClimb" aria-label="استمر بالضغط لتسلق الجدار">▥</button>
   <button class="ability" id="wShoot" aria-label="إطلاق شبكة">🕸</button>
   <button class="ability" id="wWeb" aria-label="الشبكة — تأرجح">🕷</button>
@@ -287,6 +289,7 @@ h1 { margin: 8px 0 4px; font-size: clamp(26px, 7vw, 34px); letter-spacing: -1px;
       <span>تسلق / نزول على الجدار</span><b>Q / Q + S</b>
       <span>قفزة من الجدار</span><b>Space</b>
       <span>تبديل نَسّاج / العنكبوت</span><b>C</b>
+      <span>إطلاق شبكة / ضربة قريبة</span><b>F / J</b>
       <span>دحرجة / رقصة</span><b>R / T</b>
       <span>منظور الشخص الأول</span><b>V</b>
       <span>تقريب/تبعيد الكاميرا</span><b>عجلة الماوس</b>

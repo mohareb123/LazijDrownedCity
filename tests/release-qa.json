@@ -16,14 +16,14 @@
       "footR"
     ],
     "restore": true,
-    "clips": 48,
-    "instances": 153,
+    "clips": 55,
+    "instances": 149,
     "climbing": true,
     "action": "WallClimb",
     "hand": [
-      13.120865776006035,
-      58.77896078190989,
-      -0.28165555420057486
+      13.12859509390693,
+      58.78584992864473,
+      -0.27988237954241174
     ],
     "save": {
       "got": 0,
@@ -73,8 +73,8 @@
       "Jump_Start"
     ],
     [
-      "Jump_Loop",
-      "Jump_Loop"
+      "AirFall",
+      "AirFall"
     ]
   ],
   "switched": {

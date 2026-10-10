@@ -27,7 +27,7 @@ await photo('release-swing',[27,58,10],[22,57,18]);
 await page.evaluate(()=>{qa.web.active=false;if(qa.web.line)qa.web.line.visible=false;qa.updateFlecks(2);qa.player.pos.set(45,0,45);qa.player.vel.set(0,0,0);qa.player.onGround=true;qa.creature.position.copy(qa.player.pos);qa.creature.rotation.y=0;for(let i=0;i<40;i++)qa.updateAvatar(1/60);});
 await photo('release-hero',[48,1.8,40],[45,1,45]);
 await photo('release-city',[100,112,140],[0,20,0]);
-const states=await page.evaluate(()=>{const q=qa,tests=[];for(const [name,ground,vx,vy] of [['Idle_Loop',true,0,0],['Walk_Loop',true,5,0],['Sprint_Loop',true,12,0],['Jump_Start',false,0,5],['Jump_Loop',false,0,-5]]){q.player.onGround=ground;q.player.vel.set(vx,vy,0);q.updateAvatar(.4);tests.push([name,q.action]);}return tests;});assert(states.every(x=>x[0]===x[1]));
+const states=await page.evaluate(()=>{const q=qa,tests=[];for(const [name,ground,vx,vy] of [['Idle_Loop',true,0,0],['Walk_Loop',true,5,0],['Sprint_Loop',true,12,0],['Jump_Start',false,0,5],['AirFall',false,0,-5]]){q.player.onGround=ground;q.player.vel.set(vx,vy,0);q.updateAvatar(.4);tests.push([name,q.action]);}return tests;});assert(states.every(x=>x[0]===x[1]));
 const before=await page.evaluate(()=>qa.player.pos.toArray());await page.keyboard.press('c');const switched=await page.evaluate(()=>({avatar:qa.avatar,pos:qa.player.pos.toArray()}));assert(switched.avatar==='spider');assert.deepEqual(before,switched.pos);
 const flow=await page.evaluate(()=>{
  const q=qa,checks={};q.input.climb=true;q.input.forward=1;q.setPaused(true);checks.pauseClearsInput=!q.input.climb&&q.input.forward===0;q.setPaused(false);
@@ -37,7 +37,7 @@ const flow=await page.evaluate(()=>{
  checks.bossMissionSaved=JSON.parse(localStorage.getItem('lazij-open')).mission==='boss';
  q.player.pos.set(8,78,8);
  const health=[];
- for(let i=0;i<3;i++){q.updateFx(2);q.updateBoss(2);q.shootWeb();health.push(q.boss.hp);}
+ for(let i=0;i<3;i++){q.updateFx(2);q.updateBoss(2);q.shootWeb();for(let j=0;j<12;j++)q.updateAvatar(1/60);health.push(q.boss.hp);}
  checks.health=health;checks.finished=q.phase.mission==='done'&&!q.boss.active;
  checks.endingSaved=JSON.parse(localStorage.getItem('lazij-open')).mission==='done';
  q.resetRun();checks.freshGame=q.parts.every(p=>!p.taken)&&q.phase.mission==='find'&&!q.boss.mesh.visible;

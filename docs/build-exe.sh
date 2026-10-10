@@ -11,7 +11,7 @@ cp "$ROOT"/models/{spider,hero,robot,boss,tokyo}.glb models/
 cp "$ROOT/models/CREDITS.md" "$ROOT/models/hero-LICENSE.txt" models/
 cp "$ROOT"/models/city/*.glb "$ROOT/models/city/LICENSE.txt" models/city/
 npm install --no-audit --no-fund
-npx electron-packager . LazijCity --platform=win32 --arch=x64 --electron-version=44.4.3 --asar --overwrite --out=package --app-version=1.4.0 --ignore="node_modules"
+npx electron-packager . LazijCity --platform=win32 --arch=x64 --electron-version=44.4.3 --asar --overwrite --out=package --app-version=1.5.0 --ignore="node_modules"
 cd package/LazijCity-win32-x64
 rm -f LICENSES.chromium.html
 (cd locales && ls | grep -vE '^(en-US|ar)\.pak$' | xargs -r rm --)

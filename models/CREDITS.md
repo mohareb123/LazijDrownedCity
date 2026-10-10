@@ -17,3 +17,6 @@ Three.js and example loader code: MIT, https://github.com/mrdoob/three.js/blob/r
 ## v1.4
 - Original Nassaj teal/navy suit vertex colors added at runtime to the CC0 mannequin. Two procedural traversal states use existing CC0 base clip copies plus runtime bone aiming; not separately sourced animation packs.
 - Building draw distance/LOD added; nearby Kenney meshes remain instanced, distant footprints use emissive box approximations. All collision remains conservative boxes.
+
+## v1.5 animation controller
+The original 46-clip Quaternius CC0 library remains the source. Game-specific aliases plus procedural bone aiming/offsets distinguish web shooting, web casting/release, wall ascent/descent, falling and hard landing. Punch_Jab / Punch_Cross and RobotExpressive Death are reused with gameplay-timed impact/reaction. No claim is made that all state variants are new, independently authored motion-capture clips.

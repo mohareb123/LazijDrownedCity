@@ -1,0 +1,25 @@
+{
+  "result": {
+    "shotStartsAlive": true,
+    "shotBeforeRelease": true,
+    "shotAtRelease": true,
+    "shotClip": "WebShoot",
+    "handOriginError": 0.0000017778759610741123,
+    "punchBeforeContact": true,
+    "punchAtContact": true,
+    "enemyReaction": true,
+    "punchClip": "Punch_Cross",
+    "airShot": true,
+    "switchCancelsPending": true,
+    "hitCancelsPending": true,
+    "descend": true,
+    "climb": true,
+    "fall": true,
+    "hardLanding": true,
+    "softLanding": true,
+    "spiderMelee": true,
+    "spiderAccents": 18,
+    "spiderShot": true
+  },
+  "errors": []
+}
