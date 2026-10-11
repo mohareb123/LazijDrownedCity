@@ -1,0 +1,25 @@
+{
+  "pass": {
+    "citySize": true,
+    "distinctDistricts": true,
+    "nonOverlapping": true,
+    "noAirAnchor": true,
+    "realAnchor": true,
+    "attachNoImpulse": true,
+    "releaseMomentum": true,
+    "gravity": true,
+    "frameRateIndependent": true,
+    "jumpAndLand": true,
+    "wallNotRoof": true,
+    "crossedRoof": true,
+    "insideWallNoTeleport": true,
+    "climbMantle": true,
+    "wallJump": true,
+    "bounds": true,
+    "heavyLandingImpact": true,
+    "ropeConstraint": true
+  },
+  "buildings": 6403,
+  "parks": 158,
+  "apex": 2.5266979166666577
+}

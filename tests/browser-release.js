@@ -1,11 +1,11 @@
+require('fs').mkdirSync(require('path').join(__dirname,'artifacts'),{recursive:true});
 const puppeteer=require('puppeteer'),fs=require('fs'),assert=require('assert');
-fs.mkdirSync('tests/artifacts',{recursive:true});
 (async()=>{
 const browser=await puppeteer.launch({headless:true,args:['--no-sandbox','--enable-unsafe-swiftshader','--use-gl=angle','--use-angle=swiftshader','--disable-dev-shm-usage']});
 const page=await browser.newPage();await page.setViewport({width:1280,height:800,deviceScaleFactor:1});
 const errors=[],warnings=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='warn'||m.type()==='error')warnings.push(m.text().slice(0,180))});
 await page.evaluateOnNewDocument(()=>{localStorage.setItem('lazij-open-settings',JSON.stringify({quality:'med'}));localStorage.setItem('lazij-open',JSON.stringify({v:3,avatar:'hero',pos:[45,0,45],got:0,flags:[],mission:'find',hp:5}));const raf=window.requestAnimationFrame;window.requestAnimationFrame=fn=>raf.call(window,t=>{if(!window.frozen)fn(t)});});
-await page.setRequestInterception(true);page.on('request',req=>{if(req.isNavigationRequest()){let s=fs.readFileSync('index.html','utf8');s=s.replace('</script>',`\nwindow.qa={scene,renderer,renderFrame,THREE,player,creature,camera,input,web,stepPlayer,updateAvatar,updateCamera,updateWebLine,updateCityLOD,ensureWebLine,updateFx,updateFlecks,updateBoss,resetRun,damagePlayer,setPaused,loadAll,switchAvatar,saveAll,startRun,heroBones,shootWeb,hitBoss,parts,tryCollect,race,startRace,updateRace,boss,city,
+await page.setRequestInterception(true);page.on('request',req=>{if(req.isNavigationRequest()){let s=fs.readFileSync(require('path').join(__dirname,'../index.html'),'utf8');s=s.replace('</script>',`\nwindow.qa={scene,renderer,renderFrame,THREE,player,creature,camera,input,web,stepPlayer,updateAvatar,updateCamera,updateWebLine,updateCityLOD,ensureWebLine,updateFx,updateFlecks,updateBoss,resetRun,damagePlayer,setPaused,loadAll,switchAvatar,saveAll,startRun,heroBones,shootWeb,hitBoss,parts,tryCollect,race,startRace,updateRace,boss,city,
 get hero(){return heroRoot},get spider(){return importedSpider},get mixer(){return heroMixer},get actions(){return heroActions},get bones(){return heroBones},get avatar(){return avatar},get action(){return heroAction},get phase(){return {mode,paused,uiBusy,mission,hp,score}},get count(){return cityDetailBatches.reduce((n,b)=>n+b.im.count,0)},get poseClock(){return poseTime},get report(){return importReport},get fps(){return fpsEma}};\n</script>`);req.respond({status:200,contentType:'text/html',body:s});}else req.continue()});
 await page.goto('http://127.0.0.1:8080/',{waitUntil:'load'});await page.waitForFunction(()=>window.qa?.hero&&document.getElementById('assetStatus').textContent.startsWith('جاهز'),{timeout:90000});
 assert(await page.evaluate(()=>qa.avatar==='hero'&&qa.hero.visible),'saved avatar did not restore');
@@ -20,7 +20,7 @@ const result=await page.evaluate(()=>{
  return result;
 });
 assert(result.climbing&&result.action==='WallClimb');assert(result.bones.length>=13);assert(result.save.avatar==='hero');
-async function photo(name,cam,target){await page.evaluate(({cam,target})=>{const q=qa;document.getElementById('wToast').style.display='none';q.camera.position.set(...cam);q.camera.lookAt(...target);q.camera.fov=46;q.camera.updateProjectionMatrix();q.scene.updateMatrixWorld(true);q.renderFrame()},{cam,target});await page.screenshot({path:'tests/artifacts/'+name+'.png'});}
+async function photo(name,cam,target){await page.evaluate(({cam,target})=>{const q=qa;document.getElementById('wToast').style.display='none';q.camera.position.set(...cam);q.camera.lookAt(...target);q.camera.fov=46;q.camera.updateProjectionMatrix();q.scene.updateMatrixWorld(true);q.renderFrame()},{cam,target});await page.screenshot({path:require('path').join(__dirname,'artifacts')+'/'+name+'.png'});}
 await photo('release-climb',[21,58,7],[13.52,58.3,0]);
 await page.evaluate(()=>{const q=qa;q.input.climb=false;q.player.climbing=false;q.player.pos.set(22,56,18);q.player.vel.set(8,2,3);q.player.onGround=false;q.creature.position.copy(q.player.pos);q.creature.rotation.y=0;q.web.active=true;q.web.anchor.set(0,79.6,0);q.web.len=32;q.ensureWebLine();for(let i=0;i<40;i++)q.updateAvatar(1/60);q.updateWebLine();q.updateFlecks(2);});
 await photo('release-swing',[27,58,10],[22,57,18]);
@@ -35,7 +35,7 @@ const flow=await page.evaluate(()=>{
  for(const part of q.parts.slice(0,8)){q.player.pos.copy(part.mesh.position);q.tryCollect(.016);}
  checks.eightPartsSpawnBoss=q.boss.active&&q.phase.mission==='boss'&&q.boss.hp===3;
  checks.bossMissionSaved=JSON.parse(localStorage.getItem('lazij-open')).mission==='boss';
- q.player.pos.set(8,78,8);
+ q.player.pos.set(8,180,8);
  const health=[];
  for(let i=0;i<3;i++){q.updateFx(2);q.updateBoss(2);q.shootWeb();for(let j=0;j<12;j++)q.updateAvatar(1/60);health.push(q.boss.hp);}
  checks.health=health;checks.finished=q.phase.mission==='done'&&!q.boss.active;
@@ -49,6 +49,6 @@ const flow=await page.evaluate(()=>{
  q.saveAll();const saved=q.player.pos.clone();q.player.pos.set(0,200,0);q.loadAll();checks.loadRestoresPosition=saved.distanceTo(q.player.pos)<.001;
  return checks;
 });assert(flow.eightPartsSpawnBoss&&flow.bossMissionSaved&&flow.finished&&flow.endingSaved&&flow.freshGame&&flow.respawn&&flow.loadRestoresPosition&&flow.pauseClearsInput);assert.deepEqual(flow.health,[2,1,0]);assert(flow.raceStarted&&flow.raceFinished&&flow.raceTime>0);
-console.log(JSON.stringify({result,states,switched,flow,errors,warnings},null,2));fs.writeFileSync('tests/artifacts/release-qa.json',JSON.stringify({result,states,switched,flow,errors,warnings},null,2));assert.equal(errors.length,0);
+console.log(JSON.stringify({result,states,switched,flow,errors,warnings},null,2));fs.writeFileSync(require('path').join(__dirname,'artifacts')+'/release-qa.json',JSON.stringify({result,states,switched,flow,errors,warnings},null,2));assert.equal(errors.length,0);
 await browser.close();
 })().catch(e=>{console.error(e);process.exit(1)});

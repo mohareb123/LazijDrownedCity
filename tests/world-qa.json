@@ -1,0 +1,23 @@
+{
+  "result": {
+    "buildings": 6403,
+    "cars": 392,
+    "trafficMoves": true,
+    "carSpacing": true,
+    "carsStayOnRoads": true,
+    "redLightStops": true,
+    "redPosition": [
+      -858.4,
+      0,
+      -973
+    ],
+    "greenLightResumes": true,
+    "solarClockAdvances": true,
+    "nightSelectable": true,
+    "rainTransitions": true,
+    "timePersists": true,
+    "mapPauses": true,
+    "mapCloses": true
+  },
+  "errors": []
+}

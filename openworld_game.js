@@ -22,40 +22,30 @@ function makeRand(seed) {
   };
 }
 
-const TOWER_H = 78;
-const TOWER_S = 20;
-
+const TOWER_H = 180;
+const TOWER_S = 80;
+const WORLD_LIMIT = 1230;
+const GRAVITY = 9.81;
+function districtAt(x,z) {
+  if(Math.hypot(x,z)<310)return 'وسط المدينة — ناطحات السحاب';
+  if(Math.hypot(x+600,z-420)<210)return 'حي الأعمال الغربي';
+  if(Math.hypot(x-510,z-330)<155||Math.hypot(x+660,z+450)<170)return 'الحدائق';
+  if(Math.abs(x)>850||Math.abs(z)>850)return 'الضواحي';
+  return 'الأحياء السكنية';
+}
 function buildCity(rand) {
-  const buildings = [];
-  const lots = [];
-  for (let gx = -TOWER_S; gx <= TOWER_S; gx += 2) {
-    for (let gz = -TOWER_S; gz <= TOWER_S; gz += 2) {
-      const cx = gx * 15, cz = gz * 15;
-      const half = 11;
-      lots.push({ x: cx, z: cz, half });
-      const dist = Math.hypot(cx, cz);
-      if (Math.abs(cx) < 22 && Math.abs(cz) < 22) {
-        buildings.push({ x: cx, z: cz, w: 26, d: 26, h: TOWER_H, tower: true });
-        continue;
-      }
-      const fall = Math.max(.16, 1 - dist / 400);
-      const layout = rand() < .45 ? 1 : 2;
-      for (let k = 0; k < layout; k++) {
-        const w = (layout === 1 ? 13 + rand() * 9 : 6 + rand() * 5.5);
-        const d = (layout === 1 ? 13 + rand() * 9 : 6 + rand() * 5.5);
-        let ox = 0, oz = 0;
-        if (layout === 2) {
-          if (rand() < .5) ox = (k === 0 ? -1 : 1) * (7 + rand() * 2.5);
-          else oz = (k === 0 ? -1 : 1) * (7 + rand() * 2.5);
-        }
-        const h = Math.max(6, (8 + Math.pow(rand(), 1.9) * 46) * fall * (1 + rand() * .2));
-        buildings.push({
-          x: cx + clamp(ox, -half + w / 2, half - w / 2),
-          z: cz + clamp(oz, -half + d / 2, half - d / 2),
-          w, d, h
-        });
-      }
-    }
+  const buildings=[],lots=[];
+  for(let gx=-TOWER_S;gx<=TOWER_S;gx+=2)for(let gz=-TOWER_S;gz<=TOWER_S;gz+=2){
+    const cx=gx*15,cz=gz*15,half=11;
+    const park=Math.hypot(cx-510,cz-330)<140 || Math.hypot(cx+660,cz+450)<155;
+    lots.push({x:cx,z:cz,half,park});
+    if(cx===0&&cz===0){buildings.push({x:0,z:0,w:26,d:26,h:TOWER_H,tower:true,style:18});continue;}
+    if(park)continue;
+    const dist=Math.hypot(cx,cz),business=Math.hypot(cx+600,cz-420);
+    const central=dist<280,secondary=business<170;
+    const h=central?48+Math.floor(rand()*36)*3.2:secondary?30+Math.floor(rand()*18)*3.2:6+Math.floor(rand()*7)*3.2;
+    const w=14+rand()*8,d=14+rand()*8;
+    buildings.push({x:cx,z:cz,w,d,h,style:central||secondary?14+Math.floor(rand()*5):Math.floor(rand()*14)});
   }
   const cellOf = p => Math.round(p / 30);
   const index = new Map();
@@ -125,7 +115,7 @@ function collidePush(city, p, r) {
   for (const b of bs) {
     const px = b.w / 2 + r - Math.abs(p.x - b.x);
     const pz = b.d / 2 + r - Math.abs(p.z - b.z);
-    if (px > 0 && pz > 0 && p.y < b.h - .55) {
+    if (px > 0 && pz > 0 && p.y < b.h - .025) {
       if (px < pz) p.x += (p.x >= b.x ? px : -px);
       else p.z += (p.z >= b.z ? pz : -pz);
       hit = true;
@@ -134,33 +124,33 @@ function collidePush(city, p, r) {
   return hit;
 }
 
-// Pick a web anchor: a rooftop up ahead, above us. Falls back to an air anchor.
-function pickAnchor(city, pos, fwd) {
-  let best = null, bestScore = .8;
-  const cx = Math.round(pos.x / 30), cz = Math.round(pos.z / 30);
-  for (let ix = cx - 2; ix <= cx + 2; ix++) {
-    for (let iz = cz - 2; iz <= cz + 2; iz++) {
-      const bs = city.index.get(`${ix},${iz}`);
-      if (!bs) continue;
-      for (const b of bs) {
-        if (b.h < pos.y + 5.5) continue;
-        const dx = b.x - pos.x, dz = b.z - pos.z;
-        const dist = Math.hypot(dx, dz);
-        if (dist < 7 || dist > 46) continue;
-        const dot = (dx * fwd.x + dz * fwd.z) / dist;
-        if (dot < .18) continue;
-        const score = dot * 22 - dist * .16 + (b.h - pos.y) * .12;
-        if (score > bestScore) { bestScore = score; best = b; }
-      }
-    }
+// Real building facade anchors only; an unobstructed segment must reach them.
+function sightClear(city,from,to) {
+  const n=Math.ceil(from.distanceTo(to)/1.5);
+  for(let i=1;i<n;i++) {
+    const t=i/n,x=lerp(from.x,to.x,t),y=lerp(from.y,to.y,t),z=lerp(from.z,to.z,t);
+    if(groundAt(city,x,z)>y+.05)return false;
   }
-  if (best) {
-    return { p: new THREE.Vector3(best.x, best.h + 1.6, best.z), real: true };
+  return true;
+}
+function pickAnchor(city,pos,fwd) {
+  let best=null,bestScore=-Infinity;
+  const cx=Math.round(pos.x/30),cz=Math.round(pos.z/30),seen=new Set();
+  for(let ix=cx-3;ix<=cx+3;ix++)for(let iz=cz-3;iz<=cz+3;iz++)for(const b of city.index.get(`${ix},${iz}`)||[]) {
+    if(seen.has(b))continue;seen.add(b);
+    if(b.h<pos.y+5)continue;
+    const dx=pos.x-b.x,dz=pos.z-b.z;
+    const p=new THREE.Vector3(clamp(pos.x,b.x-b.w/2,b.x+b.w/2),Math.min(b.h+.05,pos.y+38),clamp(pos.z,b.z-b.d/2,b.z+b.d/2));
+    if(Math.abs(dx)/(b.w/2)>Math.abs(dz)/(b.d/2))p.x=b.x+Math.sign(dx)*(b.w/2+.08);
+    else p.z=b.z+Math.sign(dz)*(b.d/2+.08);
+    const v=p.clone().sub(pos),dist=v.length(),flat=Math.hypot(v.x,v.z);
+    const dot=flat>.1?(v.x*fwd.x+v.z*fwd.z)/flat:1;
+    if(dist<5||dist>75||dot<.05)continue;
+    if(!sightClear(city,pos.clone().add(new THREE.Vector3(0,1,0)),p))continue;
+    const score=dot*25-dist*.15;
+    if(score>bestScore){bestScore=score;best={p,real:true,building:b};}
   }
-  return {
-    p: new THREE.Vector3(pos.x + fwd.x * 17, pos.y + 15, pos.z + fwd.z * 17),
-    real: false
-  };
+  return best;
 }
 
 function swingConstraint(pos, vel, anchor, len, maxCorr) {
@@ -168,10 +158,10 @@ function swingConstraint(pos, vel, anchor, len, maxCorr) {
   const dist = d.length();
   if (dist <= len || dist < 1e-5) return false;
   d.divideScalar(dist);
-  // smooth reel: pull at most maxCorr units this frame — a web-zip, never a teleport
+  // Unilateral rope constraint: remove only outward radial velocity.
   const gap = dist - len;
-  // small gap: snap exactly (no elastic sag). big gap: proportional zip pull, never sluggish
-  const corr = gap < 8 ? gap : Math.min(gap, Math.max(gap * .4, maxCorr ?? 0));
+  // The real anchor starts at the current distance; only manual reeling shortens it.
+  const corr = Math.min(gap,Math.max(0,maxCorr ?? gap));
   pos.addScaledVector(d, -corr);
   const radial = vel.dot(d);
   if (radial > 0) vel.addScaledVector(d, -radial);
@@ -186,6 +176,7 @@ let speed = 0;
 let sideSpeed = 0;
 
 const scene = new THREE.Scene();
+const nightUniform={value:0};
 
 /*__RIG__*/
 
@@ -254,7 +245,7 @@ scene.add(cityGlow);
 carried = new THREE.Group();
 creature.add(carried);
 
-const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, .1, 520);
+const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, .1, 1800);
 
 // ——— postprocessing: bloom (graceful — procedural world never depends on it) ———
 let composer = null, bloomPass = null, bloomOn = false;
@@ -277,7 +268,7 @@ const city = buildCity(rand);
 let fallbackCityMesh = null;
 
 const groundMesh = new THREE.Mesh(
-  new THREE.PlaneGeometry(760, 760).rotateX(-Math.PI / 2),
+  new THREE.PlaneGeometry(2520, 2520).rotateX(-Math.PI / 2),
   new THREE.MeshStandardMaterial({ color: "#0e1119", roughness: .55, metalness: .4, envMapIntensity: .6 })
 );
 groundMesh.position.y = -.02;
@@ -286,9 +277,10 @@ scene.add(groundMesh);
 {
   const geo = new THREE.BoxGeometry(1, 1, 1);
   const mat = new THREE.MeshStandardMaterial({
-    color: "#2b3247", roughness: .42, metalness: .48, envMapIntensity: 1.1
+    color: "#a7b3c3", roughness: .42, metalness: .48, envMapIntensity: 1.1
   });
   mat.onBeforeCompile = shader => {
+    shader.uniforms.uNight=nightUniform;
     shader.vertexShader='varying vec3 vCityP;varying vec3 vCityN;\n'+shader.vertexShader;
     shader.vertexShader=shader.vertexShader.replace('#include <project_vertex>',`vCityN=normal;
       vec4 cityP=vec4(transformed,1.0);
@@ -297,12 +289,12 @@ scene.add(groundMesh);
       #endif
       vCityP=(modelMatrix*cityP).xyz;
       #include <project_vertex>`);
-    shader.fragmentShader='varying vec3 vCityP;varying vec3 vCityN;\n'+shader.fragmentShader;
+    shader.fragmentShader='uniform float uNight;varying vec3 vCityP;varying vec3 vCityN;\n'+shader.fragmentShader;
     shader.fragmentShader=shader.fragmentShader.replace('#include <emissivemap_fragment>',`#include <emissivemap_fragment>
       float column=mix(vCityP.x,vCityP.z,step(.5,abs(vCityN.x)));
-      float lit=step(.36,fract(sin(floor(column*.4)*12.99+floor(vCityP.y*.45)*78.23)*43758.54));
-      float panes=step(.24,fract(column*.4))*step(fract(column*.4),.64)*step(.2,fract(vCityP.y*.45))*step(fract(vCityP.y*.45),.65);
-      totalEmissiveRadiance+=vec3(.19,.27,.38)*panes*lit*(1.0-abs(vCityN.y));`);
+      float lit=step(.36,fract(sin(floor(column*.4)*12.99+floor(vCityP.y*.3125)*78.23)*43758.54));
+      float panes=step(.24,fract(column*.4))*step(fract(column*.4),.64)*step(.2,fract(vCityP.y*.3125))*step(fract(vCityP.y*.3125),.65);
+      totalEmissiveRadiance+=vec3(.19,.27,.38)*uNight*panes*lit*(1.0-abs(vCityN.y));`);
   };
   const im = new THREE.InstancedMesh(geo, mat, city.buildings.length + city.lots.length);
   const m = new THREE.Matrix4();
@@ -318,7 +310,7 @@ scene.add(groundMesh);
   }
   for (const b of city.buildings) {
     m.makeScale(b.w, b.h, b.d);
-    m.setPosition(b.x, b.h / 2 - .3, b.z);
+    m.setPosition(b.x, b.h / 2, b.z);
     im.setMatrixAt(n, m);
     const tall = b.h > 34;
     col.setStyle(tall ? "#33405e" : "#262c3d").offsetHSL(rand() * .04 - .02, rand() * .06 - .03, (rand() - .5) * .05);
@@ -387,6 +379,10 @@ const rightVec = new THREE.Vector3();
 
 /*__PHYS_LOGIC_START__*/
 function stepPlayer(dt) {
+  let remaining=Math.min(Math.max(dt,0),.12);
+  while(remaining>1e-8){const h=Math.min(remaining,1/120);stepPlayerTick(h);remaining-=h;}
+}
+function stepPlayerTick(dt) {
   const p = player;
   p.wallCooldown=Math.max(0,(p.wallCooldown||0)-dt);
   p.climbing=false;
@@ -421,53 +417,45 @@ function stepPlayer(dt) {
   let dz = fz * input.forward + rz * input.strafe;
   const dl = Math.hypot(dx, dz);
   if (dl > 1) { dx /= dl; dz /= dl; }
-  const wantSpeed = p.onGround || web.active ? (input.sprint ? 13.5 : 9.6) : 0;
-  const accel = p.onGround ? 26 : web.active ? 12 : 5.2;
-  p.vel.x = clamp(p.vel.x + (dx * wantSpeed - p.vel.x) * Math.min(1, accel * dt / Math.max(wantSpeed, 3)), -26, 26);
-  p.vel.z = clamp(p.vel.z + (dz * wantSpeed - p.vel.z) * Math.min(1, accel * dt / Math.max(wantSpeed, 3)), -26, 26);
-
-  // gravity & jump
-  const g = web.active ? 13.5 : 25;
-  p.vel.y -= g * dt;
-  if (wantJump) {
-    wantJump = false;
-    if (p.onGround) { p.vel.y = 10.4; p.onGround = false; sfxJump(); }
+  if(p.onGround){
+    const target=input.sprint?11:7,accel=dl>.1?24:32;
+    p.vel.x+=clamp(dx*target-p.vel.x,-accel*dt,accel*dt);
+    p.vel.z+=clamp(dz*target-p.vel.z,-accel*dt,accel*dt);
+  }else{
+    p.vel.x=(p.vel.x+dx*4*dt)*Math.exp(-.025*dt);
+    p.vel.z=(p.vel.z+dz*4*dt)*Math.exp(-.025*dt);
   }
-  if (p.onGround && p.vel.y <= 0) p.vel.y = Math.max(p.vel.y, -1.5);
-
-  // web constraint + reel-in (the pull that makes swinging addictive)
-  if (web.active) {
-    web.t = (web.t || 0) + dt;
-    const d = tmpA.copy(p.pos).sub(web.anchor);
-    const dist = d.length();
-    web.len = Math.max(6.5, web.len - 7.5 * dt);
-    if (dist > web.len) {
-      web.taut = true;
-      if (swingConstraint(p.pos, p.vel, web.anchor, web.len, 26 * dt)) {
-        const sp = Math.hypot(p.vel.x, p.vel.z);
-        if (sp < 17 && dl > .1) { p.vel.x += dx * 7 * dt; p.vel.z += dz * 7 * dt; }
-      }
-    }
-    if (dist < 4.2 && !p.onGround) releaseWeb();
-  } else if (p.vel.y < -38) p.vel.y = -38;
-  if (p.vel.y > 24) p.vel.y = 24;
-  const hs = Math.hypot(p.vel.x, p.vel.z);
-  if (hs > 24) { p.vel.x *= 24 / hs; p.vel.z *= 24 / hs; }
-
-  // integrate + ground
-  p.pos.addScaledVector(p.vel, dt);
-  collidePush(city, p.pos, .42);
-  p.pos.x = clamp(p.pos.x, -345, 345);
-  p.pos.z = clamp(p.pos.z, -345, 345);
-  const gh = groundAt(city, p.pos.x, p.pos.z);
-  const wasAir = !p.onGround;
-  if (p.pos.y <= gh && p.vel.y <= 0) {
-    p.pos.y = gh;
-    p.impactSpeed=Math.abs(p.vel.y);
-    p.vel.y = 0;
-    p.onGround = true;
-    if (wasAir) fxLanded();
-  } else p.onGround = false;
+  p.vel.y-=GRAVITY*dt;
+  if(wantJump){wantJump=false;if(p.onGround){p.vel.y=7;p.onGround=false;sfxJump();}}
+  if(web.active){
+    web.t=(web.t||0)+dt;
+    if(input.sprint)web.len=Math.max(5,web.len-4*dt);
+  }
+  const hs=Math.hypot(p.vel.x,p.vel.z);
+  if(hs>40){p.vel.x*=40/hs;p.vel.z*=40/hs;}
+  p.vel.y=clamp(p.vel.y,-65,40);
+  const oldY=p.pos.y,wasAir=!p.onGround;
+  p.pos.addScaledVector(p.vel,dt);
+  if(web.active){
+    web.taut=p.pos.distanceTo(web.anchor)>web.len;
+    swingConstraint(p.pos,p.vel,web.anchor,web.len,Infinity);
+    web.check=(web.check||0)-dt;
+    if(web.check<=0){web.check=.1;if(!sightClear(city,p.pos.clone().add(new THREE.Vector3(0,.6,0)),web.anchor))releaseWeb();}
+  }
+  p.pos.x=clamp(p.pos.x,-WORLD_LIMIT,WORLD_LIMIT);p.pos.z=clamp(p.pos.z,-WORLD_LIMIT,WORLD_LIMIT);
+  let gh=groundAt(city,p.pos.x,p.pos.z);
+  const crossedRoof=p.vel.y<=0&&oldY>=gh-.04&&p.pos.y<=gh;
+  if(crossedRoof)p.pos.y=gh;
+  const beforeX=p.pos.x,beforeZ=p.pos.z;
+  collidePush(city,p.pos,.42);
+  if(Math.abs(p.pos.x-beforeX)>.0001)p.vel.x=0;
+  if(Math.abs(p.pos.z-beforeZ)>.0001)p.vel.z=0;
+  gh=groundAt(city,p.pos.x,p.pos.z);
+  const canLand=(oldY>=gh-.04 || gh<=.31) && p.pos.y<=gh+.001 && p.vel.y<=0;
+  if(canLand){
+    p.pos.y=gh;if(wasAir)p.impactSpeed=Math.abs(p.vel.y);p.vel.y=0;p.onGround=true;
+    if(wasAir)fxLanded();
+  }else p.onGround=false;
 
   if (dl > .1 && !web.active) p.heading = Math.atan2(-dx, -dz);
   else if (hs > .5) p.heading = Math.atan2(-p.vel.x, -p.vel.z);
@@ -477,17 +465,17 @@ function attachWeb() {
   if (web.active || uiBusy || paused) return;
   const fwd = tmpA.copy(fwdVec);
   const a = pickAnchor(city, player.pos, fwd);
+  if(!a){toast("لا توجد واجهة مناسبة في اتجاهك — لا يمكن ربط الخيط بالهواء");return;}
   web.anchor.copy(a.p);
   const ad = player.pos.distanceTo(web.anchor);
-  if (ad > 58) { web.active = false; return; }
-  web.len = clamp(ad * .82, 8, 36);
+  if (ad > 75) { web.active = false; return; }
+  web.len = ad;
   web.active = true;
   web.real = a.real;
   web.t = 0;
   player.webCasting=.28;
   web.taut = false;
-  if (!player.onGround) player.vel.y = Math.max(player.vel.y, 1.2);
-  else player.vel.y = 5.2;
+  // Attaching changes no velocity. Jump first; Shift deliberately reels the rope.
   ensureWebLine();
   sfxZip();
 }
@@ -495,7 +483,7 @@ function releaseWeb() {
   if (!web.active) return;
   web.active = false;
   player.webReleasing=.28;
-  player.vel.y = Math.min(player.vel.y + 2.6, 14);
+  // Releasing preserves the current momentum; no free upward impulse.
   if (web.line) web.line.visible = false;
   sfxReel();
 }
@@ -540,7 +528,7 @@ function haloTex() {
 const PART_TOTAL = 12;
 const parts = [];
 {
-  const tall = city.buildings.filter(b => b.h > 20 && !b.tower);
+  const tall = city.buildings.filter(b => b.h > 20 && !b.tower && Math.hypot(b.x,b.z)<550);
   const step = Math.max(1, Math.floor(tall.length / PART_TOTAL));
   let i = 0;
   for (let k = 0; k < PART_TOTAL && k * step < tall.length; k++) {
@@ -595,7 +583,7 @@ function streetSpotAround(x, z, rMin, rMax) {
   for (let k = 0; k < 14; k++) {
     const a = rand() * 6.283;
     const r = rMin + rand() * (rMax - rMin);
-    const sx = x + Math.cos(a) * r, sz = z + Math.sin(a) * r;
+    const sx = clamp(x + Math.cos(a) * r,-WORLD_LIMIT+4,WORLD_LIMIT-4), sz = clamp(z + Math.sin(a) * r,-WORLD_LIMIT+4,WORLD_LIMIT-4);
     const y = groundAt(city, sx, sz);
     if (y < 1) return { x: sx, z: sz, y };
   }
@@ -640,6 +628,7 @@ function updateEnemies(dt) {
     }
     e.pos.x += vx * dt;
     e.pos.z += vz * dt;
+    collidePush(city,e.pos,.55);
     e.pos.y = groundAt(city, e.pos.x, e.pos.z);
     e.mesh.position.copy(e.pos);
     e.mesh.rotation.y = Math.atan2(-vx, -vz);
@@ -692,7 +681,7 @@ function resolveWebShot() {
       return;
     }
   }
-  const best=shotTarget!==boss && shotTarget?.alive && shotTarget.pos.distanceTo(player.pos)<34 ? shotTarget : null;
+  const best=shotTarget!==boss && shotTarget?.alive && shotTarget.pos.distanceTo(player.pos)<34 && sightClear(city,player.pos.clone().add(new THREE.Vector3(0,1,0)),shotTarget.pos.clone().add(new THREE.Vector3(0,1,0))) ? shotTarget : null;
   if (best) {
     best.alive = false;
     best.mesh.visible = false;
@@ -719,6 +708,9 @@ function resolveWebShot() {
   }
 }
 function spawnShotLine(a, b) {
+  b=b.clone();const end=b.clone(),steps=Math.ceil(a.distanceTo(b)/.3);
+  for(let i=1;i<=steps;i++){const p=a.clone().lerp(end,i/steps);if(groundAt(city,p.x,p.z)>p.y){b.copy(a).lerp(end,Math.max(0,(i-1)/steps));break;}}
+
   if (shootLine) {
     scene.remove(shootLine.line);
     shootLine.line.geometry.dispose();
@@ -944,12 +936,13 @@ window.addEventListener("keydown", e => {
     if (e.code === "Enter" || e.code === "Space") { e.preventDefault(); startRun(false); }
     return;
   }
+  if(e.code==="Tab"){e.preventDefault();toggleWorldMap();return;}
   if (e.code === "KeyP") { togglePause(); return; }
   if (e.code === "KeyV") { firstPerson = !firstPerson; creature.visible = !firstPerson;
     toast(firstPerson ? "منظور الشخص الأول 👁" : "منظور خلفي 🎥"); return; }
   if (e.code === "F3") { e.preventDefault(); SET.showFps = SET.showFps ? 0 : 1; applySettings(); saveSettings(); return; }
   if (e.code === "KeyM") { startRace(); return; }
-  if (paused || uiBusy) return;
+  if (paused || uiBusy || worldMapOpen) return;
   if (e.code === "KeyQ") { input.climb=true; e.preventDefault(); }
   if (e.code === "KeyC" && !e.repeat) { switchAvatar(); return; }
   if (e.code === "KeyR" && !e.repeat && player.onGround && actionTimer<=0) { beginAction('roll',.9); invuln=Math.max(invuln,.4); player.vel.addScaledVector(fwdVec,5); return; }
@@ -1287,6 +1280,7 @@ const ENDING = [
 let paused = false;
 function togglePause() {
   if (mode !== "play" || uiBusy) return;
+  if(worldMapOpen){toggleWorldMap();return;}
   setPaused(!paused);
 }
 document.addEventListener("visibilitychange", () => {
@@ -1307,14 +1301,14 @@ function saveAll() {
       mission,
       hp, score, raceBest, avatar, bossHp:boss.active?boss.hp:0,
       pos: [player.pos.x, player.pos.y, player.pos.z],
-      v: 3
+      worldHour,weatherClock,v: 4
     }));
   } catch {}
 }
 function loadAll() {
   let data = null;
   try { data = JSON.parse(localStorage.getItem("lazij-open") || "null"); } catch {}
-  if (!data || ![1,2,3].includes(data.v)) return false;
+  if (!data || ![1,2,3,4].includes(data.v)) return false;
   for (let i = 0; i < Math.min(parts.length, (data.flags || []).length); i++) {
     if (data.flags[i]) {
       parts[i].taken = true;
@@ -1324,8 +1318,10 @@ function loadAll() {
   }
   partsGot = data.got || parts.filter(p => p.taken).length;
   mission = data.mission || "find";
-  if (Array.isArray(data.pos) && data.pos.length===3 && data.pos.every(Number.isFinite)) player.pos.set(clamp(data.pos[0],-345,345),clamp(data.pos[1],0,250),clamp(data.pos[2],-345,345));
+  if (Array.isArray(data.pos) && data.pos.length===3 && data.pos.every(Number.isFinite)) player.pos.set(clamp(data.pos[0],-WORLD_LIMIT,WORLD_LIMIT),clamp(data.pos[1],0,500),clamp(data.pos[2],-WORLD_LIMIT,WORLD_LIMIT));
   avatar=data.avatar==='hero'?'hero':'spider';
+  if(Number.isFinite(data.worldHour))worldHour=((data.worldHour%24)+24)%24;
+  weatherClock=Math.max(0,Number(data.weatherClock)||0);
   hp = clamp(Number(data.hp)||5,1,5); score = Math.max(0,Number(data.score)||0); raceBest = Math.max(0, Number(data.raceBest)||0);
   if (mission === "boss") {summonBoss();boss.hp=clamp(Number(data.bossHp)||3,1,3);renderBossPips();}
   return true;
@@ -1343,6 +1339,9 @@ const shotAim=new THREE.Vector3();
 const spiderAccents=[];
 const originalCreatureParts = [...creature.children];
 let robotTmpl = null, robotClips = {}, bossTmpl = null, bossClips = {}, skyline = null;
+let worldHour=16,weatherClock=0,weatherWet=0,trafficClock=0;
+const cars=[],trafficRoutes=[],streetLights=[];
+let worldMapOpen=false;
 const resumed = loadAll();
 
 // ——————————————————— main loop ———————————————————
@@ -1353,13 +1352,14 @@ let uiClock = 0;
 function animate(now) {
   requestAnimationFrame(animate);
   const elapsed = Math.max(.001,(now - lastTime) / 1000);
-  const rawDt = Math.min(elapsed, .04);
+  const rawDt = Math.min(elapsed, .1);
   lastTime = now;
   frame++;
   fpsTick(elapsed);
   lodClock+=rawDt;
   if(lodClock>.4){lodClock=0;updateCityLOD();}
   if (mode === "menu") {
+    updateLivingWorld(rawDt);
     menuFlyby(rawDt);
     renderFrame();
     return;
@@ -1370,11 +1370,13 @@ function animate(now) {
   }
   saveClock+=rawDt;if(saveClock>15){saveClock=0;saveAll();}
   pollGamepad();
+  updateLivingWorld(rawDt);
   updateRace(rawDt);
   scoreShown = damp(scoreShown, score, 5, rawDt);
   $("wScore").textContent = Math.round(scoreShown);
   const dt = rawDt * fxSlow;
   stepPlayer(dt);
+  handleCarContact();
   if (invuln <= 0) updateEnemies(dt);
   if (boss.active) updateBoss(dt);
   tryCollect(dt);
@@ -1412,7 +1414,8 @@ function animate(now) {
 
   updateCamera(dt);
   updateToast(now);
-  if (frame % 2 === 0) drawMinimap();
+  if (frame % 4 === 0) drawMinimap();
+  if(worldMapOpen && frame%15===0)drawWorldMap();
   uiClock += rawDt;
   if (uiClock > .25) { uiClock = 0; updateMarker(); }
 
@@ -1726,7 +1729,7 @@ function chooseShotTarget() {
   let best=33;
   for(const e of enemies) {
     const d=e.pos.clone().sub(player.pos),flat=Math.hypot(d.x,d.z);
-    if(e.alive && d.length()<best && Math.abs(d.y)<12 && (flat<2 || forward.dot(d.clone().setY(0).normalize())>-.1)) {shotTarget=e;best=d.length();}
+    if(e.alive && d.length()<best && Math.abs(d.y)<12 && (flat<2 || forward.dot(d.clone().setY(0).normalize())>-.1) && sightClear(city,player.pos.clone().add(new THREE.Vector3(0,1,0)),e.pos.clone().add(new THREE.Vector3(0,1,0)))) {shotTarget=e;best=d.length();}
   }
   if(boss.active && player.pos.y>TOWER_H-3 && player.pos.distanceTo(boss.pos)<36)shotTarget=boss;
   if(shotTarget)shotAim.copy(shotTarget.pos).add(new THREE.Vector3(0,1.25,0));
@@ -1742,7 +1745,7 @@ function resolveMeleeHit() {
   let victim=null,distance=2.8;
   for(const e of enemies) {
     const d=e.pos.clone().sub(player.pos),flat=Math.hypot(d.x,d.z);
-    if(e.alive && Math.abs(d.y)<2 && flat<distance && (flat<.4||forward.dot(d.clone().setY(0).normalize())>0)) {victim=e;distance=flat;}
+    if(e.alive && Math.abs(d.y)<2 && flat<distance && (flat<.4||forward.dot(d.clone().setY(0).normalize())>0) && sightClear(city,player.pos.clone().add(new THREE.Vector3(0,1,0)),e.pos.clone().add(new THREE.Vector3(0,1,0)))) {victim=e;distance=flat;}
   }
   if(boss.active && player.pos.y>TOWER_H-3 && player.pos.distanceTo(boss.pos)<4) {hitBoss();return;}
   if(!victim) {tone(160,80,.08,'sine',.05);return;}
@@ -1899,7 +1902,7 @@ function updateCityLOD() {
   }
   city.buildings.forEach((b,i)=>{
     if(near(b))m.makeScale(0,0,0);
-    else {m.makeScale(b.w,b.h,b.d);m.setPosition(b.x,b.h/2-.3,b.z);}
+    else {m.makeScale(b.w,b.h,b.d);m.setPosition(b.x,b.h/2,b.z);}
     fallbackCityMesh.setMatrixAt(city.lots.length+i,m);
   });
   fallbackCityMesh.instanceMatrix.needsUpdate=true;
@@ -1913,7 +1916,7 @@ async function importCityBlocks() {
     for(let t=0;t<models.length;t++) {
       const root=models[t].scene; root.updateMatrixWorld(true);
       const box=new THREE.Box3().setFromObject(root), sz=box.getSize(new THREE.Vector3()), center=box.getCenter(new THREE.Vector3());
-      const matches=city.buildings.filter((b,i)=>b.tower ? t===18 : i % models.length===t);
+      const matches=city.buildings.filter(b=>b.style===t);
       root.traverse(o=>{
         if(!o.isMesh || !matches.length) return;
         const geo=o.geometry.clone(); geo.applyMatrix4(o.matrixWorld);
@@ -1928,12 +1931,146 @@ async function importCityBlocks() {
     scene.add(group); fallbackCityMesh.visible=true;updateCityLOD();
     // Matching sidewalks and clear eight-metre street corridors.
     const walk=new THREE.InstancedMesh(new THREE.BoxGeometry(23,.28,23),new THREE.MeshStandardMaterial({color:0x4b5362,roughness:.95}),city.lots.length);
-    const m=new THREE.Matrix4();city.lots.forEach((l,i)=>{m.makeTranslation(l.x,.05,l.z);walk.setMatrixAt(i,m)});scene.add(walk);
+    const m=new THREE.Matrix4();city.lots.forEach((l,i)=>{m.makeTranslation(l.x,.05,l.z);walk.setMatrixAt(i,m);walk.setColorAt(i,new THREE.Color(l.park?0x52764e:0xffffff))});scene.add(walk);
     const marks=[];
-    for(let x=-315;x<=315;x+=30) for(let z=-330;z<=330;z+=8){ marks.push(x,.015,z,x,.015,z+3); marks.push(z,.016,x,z+3,.016,x); }
+    for(let x=-1215;x<=1215;x+=30) for(let z=-1230;z<=1230;z+=10){ marks.push(x,.015,z,x,.015,z+3); marks.push(z,.016,x,z+3,.016,x); }
     const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(marks,3));scene.add(new THREE.LineSegments(geo,new THREE.LineBasicMaterial({color:0x9da695})));
     toast(`أحياء اللعب جاهزة: ${city.buildings.length} مبنى مستورد • 19 تصميمًا • شوارع متصلة`);
   } catch(err) { console.warn('city modules',err.message); toast('تعذر تحميل بعض المباني؛ المدينة الاحتياطية متاحة'); }
+}
+
+// Offline world simulation: solar cycle, weather and lane-following traffic.
+let skyDome=null, skyUniforms=null, carDraws=[];
+const clockSky = new THREE.Color(), nightSky = new THREE.Color(0x081124), daySky = new THREE.Color(0x88b4d3);
+function initLivingWorld() {
+  skyUniforms={uDay:{value:1},uCloud:{value:0},uSun:{value:new THREE.Vector3(0,1,0)}};
+  skyDome=new THREE.Mesh(new THREE.SphereGeometry(1500,24,16),new THREE.ShaderMaterial({side:THREE.BackSide,depthWrite:false,depthTest:false,uniforms:skyUniforms,
+    vertexShader:'varying vec3 vDirection;void main(){vDirection=normalize(position);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
+    fragmentShader:`varying vec3 vDirection;uniform float uDay,uCloud;uniform vec3 uSun;
+    void main(){vec3 d=normalize(vDirection);float h=clamp(d.y*.8+.15,0.,1.);
+    vec3 top=mix(vec3(.007,.013,.035),vec3(.16,.39,.68),uDay);
+    vec3 horizon=mix(vec3(.03,.045,.08),vec3(.60,.73,.82),uDay);
+    vec3 col=mix(horizon,top,h);col=mix(col,vec3(.2,.24,.29)*(.3+uDay*.7),uCloud*.6);
+    float sun=smoothstep(.9992,.9998,dot(d,uSun));col+=vec3(1.,.80,.40)*sun*uDay*(1.-uCloud*.8);
+    float moon=smoothstep(.99955,.9998,dot(d,-uSun));col+=vec3(.48,.61,.81)*moon*(1.-uDay);
+    float stars=step(.9988,fract(sin(dot(floor(d.xz*1700.),vec2(12.98,78.23)))*43758.54))*step(.12,d.y);
+    col+=vec3(stars*.5*(1.-uDay)*(1.-uCloud));gl_FragColor=vec4(col,1.);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
+    }`}));skyDome.renderOrder=-1000;skyDome.frustumCulled=false;scene.add(skyDome);
+  // Rounded loops stay in the 8-metre road corridors; adjacent cars share a lane.
+  const rng=makeRand(6991);
+  for(let gx=-3;gx<=3;gx++)for(let gz=-3;gz<=3;gz++) {
+    const x0=gx*300-73,x1=gx*300+73,z0=gz*300-73,z1=gz*300+73,r=2;
+    const corners=[[x1-r,z0+r,-Math.PI/2],[x1-r,z1-r,0],[x0+r,z1-r,Math.PI/2],[x0+r,z0+r,Math.PI]];
+    const points=[new THREE.Vector3(x0+r,0,z0)];
+    for(const [cx,cz,start] of corners){for(let j=0;j<=8;j++){const a=start+j*Math.PI/16;points.push(new THREE.Vector3(cx+Math.cos(a)*r,0,cz+Math.sin(a)*r));}}
+    const segments=[],lengths=[];let total=0;
+    for(let i=0;i<points.length;i++){const a=points[i],b=points[(i+1)%points.length];const len=a.distanceTo(b);if(len<.001)continue;segments.push({a,b,len,start:total});total+=len;lengths.push(total);}
+    const route={segments,total,cars:[]};trafficRoutes.push(route);
+    for(let i=0;i<8;i++){const car={route,s:(i/8)*total,speed:0,maxSpeed:7+rng()*3,pos:new THREE.Vector3(),dir:new THREE.Vector3(0,0,1),color:new THREE.Color([0xc04f53,0x319e9d,0xd6b34a,0x6287b1,0xd6d8dd][Math.floor(rng()*5)])};route.cars.push(car);cars.push(car);sampleCar(car);}
+  }
+  const make=(geo,material,offsets)=>{const mesh=new THREE.InstancedMesh(geo,material,cars.length*offsets.length);mesh.frustumCulled=false;scene.add(mesh);carDraws.push({mesh,offsets});return mesh;};
+  const body=make(new THREE.BoxGeometry(1.8,.57,3.65),new THREE.MeshStandardMaterial({color:0xffffff,roughness:.35,metalness:.3}),[[0,.57,0]]);body.userData.paint=true;
+  make(new THREE.BoxGeometry(1.5,.65,1.75),new THREE.MeshStandardMaterial({color:0x20374a,roughness:.18,metalness:.4}),[[0,1.16,-.12]]);
+  make(new THREE.CylinderGeometry(.31,.31,.18,10).rotateZ(Math.PI/2),new THREE.MeshStandardMaterial({color:0x11151c,roughness:.9}),[[-.94,.31,-1.15],[.94,.31,-1.15],[-.94,.31,1.15],[.94,.31,1.15]]);
+  const head=new THREE.MeshStandardMaterial({color:0xfff0bf,emissive:0xffe7a0,emissiveIntensity:.2});head.userData.headlight=true;
+  make(new THREE.BoxGeometry(.38,.14,.06),head,[[-.55,.62,1.84],[.55,.62,1.84]]);
+  make(new THREE.BoxGeometry(.34,.12,.06),new THREE.MeshStandardMaterial({color:0xb02025,emissive:0xd02018,emissiveIntensity:.6}),[[-.58,.63,-1.84],[.58,.63,-1.84]]);
+  make(new THREE.PlaneGeometry(2.2,4.1).rotateX(-Math.PI/2),new THREE.MeshBasicMaterial({color:0x000000,transparent:true,opacity:.24,depthWrite:false}),[[0,.025,0]]);
+  // Signal props at route corners; all cross streets obey the same two-phase rule.
+  for(const route of trafficRoutes){for(const segment of route.segments.filter(s=>s.len>100)){
+    const p=segment.b;const pole=new THREE.Mesh(new THREE.CylinderGeometry(.06,.08,3.1,5),new THREE.MeshStandardMaterial({color:0x384452}));pole.position.set(p.x+1.3,1.55,p.z+1.3);scene.add(pole);
+    const bulb=new THREE.Mesh(new THREE.SphereGeometry(.17,6,5),new THREE.MeshBasicMaterial({color:0xff4433}));bulb.position.copy(pole.position);bulb.position.y=3.15;scene.add(bulb);streetLights.push({pole,bulb,axis:Math.abs(segment.a.x-p.x)>5?'x':'z'});
+  }}
+  // Low-cost trees in two actual open parks.
+  const parkLots=city.lots.filter(l=>l.park),trunk=new THREE.InstancedMesh(new THREE.CylinderGeometry(.2,.3,2.8,5),new THREE.MeshStandardMaterial({color:0x72573e}),parkLots.length),leaf=new THREE.InstancedMesh(new THREE.IcosahedronGeometry(2.3,0),new THREE.MeshStandardMaterial({color:0x365f43,roughness:1}),parkLots.length);
+  const m=new THREE.Matrix4();parkLots.forEach((l,i)=>{m.makeTranslation(l.x,1.4,l.z);trunk.setMatrixAt(i,m);m.makeScale(1,1.25,1);m.setPosition(l.x,4,l.z);leaf.setMatrixAt(i,m);});scene.add(trunk,leaf);
+  updateLivingWorld(0);
+}
+function sampleCar(car) {
+  const s=((car.s%car.route.total)+car.route.total)%car.route.total;
+  const seg=car.route.segments.find(seg=>s<seg.start+seg.len)||car.route.segments[0];
+  car.pos.copy(seg.a).lerp(seg.b,clamp((s-seg.start)/seg.len,0,1));car.dir.copy(seg.b).sub(seg.a).normalize();
+}
+function trafficGreen(axis) {
+  const phase=trafficClock%24;
+  if(phase<1||phase>12&&phase<13)return false;
+  return axis==='x'?phase>=13:phase>=1&&phase<=12;
+}
+function updateTraffic(dt) {
+  trafficClock+=dt;
+  for(const route of trafficRoutes)for(const car of route.cars){
+    let target=car.maxSpeed,allowed=Infinity;
+    for(const other of route.cars)if(other!==car){const gap=(other.s-car.s+route.total)%route.total;if(gap<20){target=Math.min(target,Math.max(0,(gap-6)*.7));allowed=Math.min(allowed,Math.max(0,gap-5.8));}}
+    const axis=Math.abs(car.dir.x)>.95?'x':Math.abs(car.dir.z)>.95?'z':null;
+    if(axis&&!trafficGreen(axis)){
+      const p=car.pos[axis],sign=Math.sign(car.dir[axis]);
+      const next=15+(sign>0?Math.ceil((p-15+.01)/30):Math.floor((p-15-.01)/30))*30;
+      const distance=(next-p)*sign;
+      if(distance>=3.25 && distance<18){const stop=Math.max(0,distance-3.4);target=Math.min(target,Math.sqrt(6*stop));allowed=Math.min(allowed,stop);}
+    }
+    if(mode==='play'&&player.pos.y<1.6){const delta=player.pos.clone().sub(car.pos),ahead=delta.dot(car.dir),lateral=Math.abs(delta.x*car.dir.z-delta.z*car.dir.x);if(ahead>0&&ahead<12&&lateral<1.7){const stop=Math.max(0,ahead-3);target=Math.min(target,Math.sqrt(8*stop));allowed=Math.min(allowed,stop);}}
+    car.speed+=clamp(target-car.speed,-5*dt,2.5*dt);
+    const advance=Math.min(allowed,Math.max(0,car.speed*dt));if(dt>0&&advance<car.speed*dt)car.speed=advance/dt;
+    car.s=(car.s+advance)%route.total;sampleCar(car);
+  }
+  const center=mode==='menu'?camera.position:player.pos,radius=SET.quality==='low'?160:260;
+  const active=cars.filter(c=>Math.hypot(c.pos.x-center.x,c.pos.z-center.z)<radius);
+  const base=new THREE.Matrix4(),offset=new THREE.Matrix4(),out=new THREE.Matrix4();
+  for(const draw of carDraws){let i=0;for(const car of active){base.makeRotationY(Math.atan2(car.dir.x,car.dir.z));base.setPosition(car.pos);for(const p of draw.offsets){offset.makeTranslation(...p);out.multiplyMatrices(base,offset);draw.mesh.setMatrixAt(i,out);if(draw.mesh.userData.paint)draw.mesh.setColorAt(i,car.color);i++;}}draw.mesh.count=i;draw.mesh.instanceMatrix.needsUpdate=true;if(draw.mesh.instanceColor)draw.mesh.instanceColor.needsUpdate=true;}
+  for(const s of streetLights){const near=s.pole.position.distanceTo(center)<radius;s.pole.visible=near;s.bulb.visible=near;s.bulb.material.color.setHex(trafficGreen(s.axis)?0x40e39a:0xef4938);}
+}
+function handleCarContact() {
+  if(player.pos.y>1.35)return;
+  for(const car of cars){
+    const dx=player.pos.x-car.pos.x,dz=player.pos.z-car.pos.z;if(Math.abs(dx)>3||Math.abs(dz)>3)continue;
+    const localX=dx*car.dir.z-dz*car.dir.x,localZ=dx*car.dir.x+dz*car.dir.z;
+    if(Math.abs(localX)>=1.25||Math.abs(localZ)>=2.35)continue;
+    const sx=Math.sign(localX)||1,sz=Math.sign(localZ)||1;
+    if(1.25-Math.abs(localX)<2.35-Math.abs(localZ)){const push=sx*(1.25-Math.abs(localX));player.pos.x+=car.dir.z*push;player.pos.z-=car.dir.x*push;}
+    else{const push=sz*(2.35-Math.abs(localZ));player.pos.addScaledVector(car.dir,push);}
+    collidePush(city,player.pos,.42);
+    if(car.speed>3&&invuln<=0){invuln=1.6;damagePlayer(1);player.vel.addScaledVector(car.dir,4);toast('اصطدام! السيارات تفرمل للمشاة، لكن الاقتراب الجانبي خطر.');}
+  }
+}
+function updateLivingWorld(dt) {
+  if(!skyUniforms)return;
+  if(SET.timeMode==='auto')worldHour=(worldHour+dt*24/(Math.max(4,SET.dayMinutes)*60))%24;
+  else worldHour=SET.timeMode==='day'?12:SET.timeMode==='sunset'?18:0;
+  weatherClock+=dt;
+  const weather=SET.weather==='rain'?2:SET.weather==='clear'?0:Math.floor(weatherClock/180)%3;
+  weatherWet=damp(weatherWet,weather===2?1:0,.12,dt);
+  const cloud=weather===0?0:weather===1?.55:.85;
+  const angle=(worldHour-6)/24*Math.PI*2,elevation=Math.sin(angle),day=THREE.MathUtils.smoothstep(elevation,-.13,.18);
+  const dir=new THREE.Vector3(Math.cos(angle)*.85,elevation,Math.cos(angle)*.45).normalize();
+  skyUniforms.uDay.value=day;skyUniforms.uCloud.value=cloud;skyUniforms.uSun.value.copy(dir);skyDome.position.copy(camera.position);
+  nightUniform.value=1-day;
+  hemi.color.set(day>.5?0xbfdfff:0x657eac);hemi.groundColor.set(day>.5?0x8c988a:0x142238);hemi.intensity=lerp(.55,2.3,day)*(1-cloud*.2);
+  moon.position.copy(dir).multiplyScalar(day>.1?800:-800);moon.color.set(day>.1?0xffedce:0x8aaae2);moon.intensity=lerp(.3,2.5,day)*(1-cloud*.6);
+  cityGlow.intensity=.08+(1-day)*.2;
+  clockSky.copy(nightSky).lerp(daySky,day).lerp(new THREE.Color(0x62798b),cloud*.3);scene.fog.color.copy(clockSky);scene.fog.density=(SET.quality==='low'?.0022:.0015)+cloud*.0008;
+  rain.visible=weatherWet>.03;rain.material.opacity=.32*weatherWet;rainGeo.setDrawRange(0,Math.floor(rainActive*weatherWet)*2);
+  groundMesh.material.roughness=lerp(.95,.35,weatherWet);
+  for(const d of carDraws)if(d.mesh.material.userData.headlight)d.mesh.material.emissiveIntensity=.15+(1-day)*3;
+  updateTraffic(dt);
+  const h=Math.floor(worldHour),m=Math.floor((worldHour-h)*60);
+  $('worldClock').textContent=`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')} • ${['صحو','غائم','مطر'][weather]}`;
+  $('worldDistrict').textContent=districtAt(player.pos.x,player.pos.z);
+}
+function toggleWorldMap() {
+  if(mode!=='play'||uiBusy)return;
+  worldMapOpen=!worldMapOpen;$('worldMapPanel').classList.toggle('hidden',!worldMapOpen);
+  if(worldMapOpen){clearControls();setPaused(true);$('pause').classList.add('hidden');drawWorldMap();}else setPaused(false);
+}
+function drawWorldMap() {
+  const canvas=$('worldMapCanvas'),c=canvas.getContext('2d'),S=700,k=S/(WORLD_LIMIT*2+60);
+  c.fillStyle='#101d2e';c.fillRect(0,0,S,S);c.save();c.translate(S/2,S/2);
+  for(const l of city.lots)if(l.park){c.fillStyle='#416c53';c.fillRect((l.x-11)*k,(l.z-11)*k,22*k,22*k);}
+  for(const b of city.buildings){c.fillStyle=b.tower?'#f7cd66':b.h>70?'#68abb9':'#536478';c.fillRect((b.x-b.w/2)*k,(b.z-b.d/2)*k,Math.max(2,b.w*k),Math.max(2,b.d*k));}
+  for(const p of parts)if(!p.taken){c.fillStyle='#ffe493';c.beginPath();c.arc(p.mesh.position.x*k,p.mesh.position.z*k,4,0,7);c.fill();}
+  c.fillStyle='#ff7c87';c.beginPath();c.arc(player.pos.x*k,player.pos.z*k,6,0,7);c.fill();c.strokeStyle='white';c.stroke();
+  c.restore();$('worldMapInfo').textContent=`${(WORLD_LIMIT*2/1000).toFixed(2)} × ${(WORLD_LIMIT*2/1000).toFixed(2)} كم • ${city.buildings.length} مبنى • ${cars.length} سيارة مرور • اللون الذهبي: أهداف المهمة`;
 }
 
 // ═══════════════ PC GAME LAYER — states, menu, settings, audio, health, races, gamepad ═══════════════
@@ -1950,7 +2087,7 @@ try { introSeen = localStorage.getItem("lazij-open-intro") === "1"; } catch {}
 const touchDevice = matchMedia("(pointer: coarse)").matches;
 
 // ————— settings —————
-const SET = { quality: "high", sens: 1, fov: 66, sfx: .8, mus: .5, showFps: 0 };
+const SET = { weather:"auto",dayMinutes:12,timeMode:"auto",quality: "high", sens: 1, fov: 66, sfx: .8, mus: .5, showFps: 0 };
 try { Object.assign(SET, JSON.parse(localStorage.getItem("lazij-open-settings") || "{}")); } catch {}
 function saveSettings() {
   try { localStorage.setItem("lazij-open-settings", JSON.stringify(SET)); } catch {}
@@ -1967,7 +2104,7 @@ function applySettings() {
     bloomOn = SET.quality !== "low";
     bloomPass.strength = SET.quality === "high" ? .72 : .5;
   }
-  scene.fog.density = SET.quality === "low" ? .006 : .0035;
+  scene.fog.density = SET.quality === "low" ? .0027 : .0018;
   rainActive = SET.quality === "low" ? 130 : SET.quality === "med" ? 280 : RAIN_COUNT;
   rainGeo.setDrawRange(0, rainActive * 2);
   $("fpsBox").classList.toggle("hidden", !SET.showFps);
@@ -2263,7 +2400,7 @@ function setPaused(v) {
   if (mode !== "play") return;
   paused = v;
   $("wPause").textContent = paused ? "▶" : "Ⅱ";
-  $("pause").classList.toggle("hidden", !paused);
+  $("pause").classList.toggle("hidden", !paused || worldMapOpen);
   if (paused) {
     clearControls();
     try { document.exitPointerLock(); } catch {}
@@ -2373,6 +2510,11 @@ $("setFps").onchange = e => { SET.showFps = +e.target.value; applySettings(); sa
 document.querySelectorAll(".mBtn, .primary, .secondary").forEach(b =>
   b.addEventListener("click", () => { initAudio(); sfxUI(); }));
 
+$('mapClose').onclick=toggleWorldMap;
+$('mapOpen').onclick=toggleWorldMap;
+for(const [id,key] of [['setTime','timeMode'],['setDayLength','dayMinutes'],['setWeather','weather']]){
+  $(id).value=String(SET[key]);$(id).onchange=e=>{SET[key]=key==='dayMinutes'?+e.target.value:e.target.value;saveSettings();updateLivingWorld(0);};
+}
 // ————— boot —————
 $("setQuality").value = SET.quality;
 $("setSens").value = SET.sens;
@@ -2387,6 +2529,7 @@ $("mContinue").disabled = !resumed;
 $("wPause").classList.add("hidden");
 document.addEventListener("pointerdown", () => { if (mode === "play") initAudio(); }, { once: true });
 $('avatarSwitch').onclick = switchAvatar;
+initLivingWorld();
 requestAnimationFrame(animate);
 importModels();
 

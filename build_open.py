@@ -212,6 +212,9 @@ h1 { margin: 8px 0 4px; font-size: clamp(26px, 7vw, 34px); letter-spacing: -1px;
   font-size: 12.5px; font-weight: 800; pointer-events: none; border: 1px solid rgba(120,160,255,.3); }
 #menu .mcard::-webkit-scrollbar { width: 8px; } #menu .mcard::-webkit-scrollbar-thumb { background: #2a3854; border-radius: 8px; }
 @media(max-width:850px){#avatarPanel{bottom:94px!important;max-width:calc(100% - 32px)}#wActions{bottom:14px!important;right:12px!important;gap:6px!important}.ability{width:48px!important;height:48px!important}#wJump{width:56px!important;height:56px!important}}
+#worldStatus{position:fixed;left:20px;top:88px;z-index:5;background:#dbe7efd9;color:#20354a;border-radius:15px;padding:10px 15px;font-size:12px;pointer-events:auto}#worldClock{font-size:17px;font-weight:bold;direction:ltr}#mapOpen{border:0;border-radius:8px;padding:7px;margin-top:7px;background:#bad5dd;color:#20354a;cursor:pointer}
+#worldMapPanel{position:fixed;inset:0;z-index:60;background:#091222e8;display:flex;align-items:center;justify-content:center}#worldMapPanel.hidden{display:none}.mapCard{background:#dbe7ef;border-radius:22px;padding:20px;max-width:85vw;text-align:center;color:#20354a}#worldMapCanvas{position:relative;inset:auto;margin:auto;width:min(68vh,70vw);height:min(68vh,70vw);border-radius:12px}#mapClose{padding:10px 20px;border:0;border-radius:10px;background:#aac9da;cursor:pointer}#worldMapInfo{font-size:12px;margin:10px 0}
+@media(max-width:700px){#worldStatus{top:115px;left:10px;padding:6px;font-size:10px}#worldClock{font-size:13px}}
 </style>
 </head>
 <body>
@@ -227,11 +230,13 @@ h1 { margin: 8px 0 4px; font-size: clamp(26px, 7vw, 34px); letter-spacing: -1px;
   </div>
   <div class="pill"><span id="wArrow">▲</span><span id="wDist">0م</span><span id="wMission">اجمع قطع النول من الأسطح</span></div>
 </div>
-<div id="avatarPanel" class="hidden" style="position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:6;background:#d9e4f2;color:#192536;border-radius:16px;padding:10px 18px;font-size:13px;text-align:center"><button id="avatarSwitch" disabled style="background:#b9cfea;padding:8px 16px;border-radius:10px;color:#18283d">C • العنكبوت</button> <span id="avatarState">وقوف</span><div>F إطلاق شبكة · J لكمة · Q تسلق · Q+S نزول</div><div>Space قفز · R تفادٍ · C تبديل</div><div id="assetStatus" style="font-size:11px;color:#52657a">تحميل الشخصيات والأحياء…</div><details><summary>معرض الحركات — للتجربة فقط</summary><select id="animationSelect" aria-label="استعراض حركة" style="max-width:220px;padding:7px;border:0;border-radius:8px"><option value="Idle_Loop">اختيار حركة</option></select></details></div>
+<div id="avatarPanel" class="hidden" style="position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:6;background:#d9e4f2;color:#192536;border-radius:16px;padding:10px 18px;font-size:13px;text-align:center"><button id="avatarSwitch" disabled style="background:#b9cfea;padding:8px 16px;border-radius:10px;color:#18283d">C • العنكبوت</button> <span id="avatarState">وقوف</span><div>F إطلاق شبكة · J لكمة · Q تسلق · Q+S نزول</div><div>Space قفز · E خيط على واجهة · Shift سحب · Tab خريطة</div><div id="assetStatus" style="font-size:11px;color:#52657a">تحميل الشخصيات والأحياء…</div><details><summary>معرض الحركات — للتجربة فقط</summary><select id="animationSelect" aria-label="استعراض حركة" style="max-width:220px;padding:7px;border:0;border-radius:8px"><option value="Idle_Loop">اختيار حركة</option></select></details></div>
 <button id="wPause" aria-label="إيقاف">Ⅱ</button>
 <div id="bossWrap" class="hidden"><span>الملك الأسود</span><span id="bossPips">●●●</span></div>
 <div id="wToast"></div>
 <canvas id="minimap"></canvas>
+<div id="worldStatus"><div id="worldClock"></div><div id="worldDistrict"></div><button id="mapOpen">Tab • خريطة المدينة</button></div>
+<div id="worldMapPanel" class="hidden"><div class="mapCard"><h2>المدينة • شمال ↑</h2><canvas id="worldMapCanvas" width="700" height="700"></canvas><div id="worldMapInfo"></div><button id="mapClose">Tab • العودة للّعب</button></div></div>
 <div id="senseVignette"></div>
 <div id="skyFlash"></div>
 <div id="raceHud" class="hidden">🏁 <span id="raceTxt"></span></div>
@@ -269,6 +274,9 @@ h1 { margin: 8px 0 4px; font-size: clamp(26px, 7vw, 34px); letter-spacing: -1px;
   <div class="mcard hidden" id="menuSettings">
     <div class="mtitle"><h1 style="font-size:24px">⚙️ الإعدادات</h1></div>
     <div class="setRow"><span>جودة الرسوم</span><select id="setQuality"><option value="low">منخفضة</option><option value="med">متوسطة</option><option value="high">عالية</option></select></div>
+    <div class="setRow"><span>وقت اليوم</span><select id="setTime"><option value="auto">دورة تلقائية</option><option value="day">نهار</option><option value="sunset">غروب</option><option value="night">ليل</option></select></div>
+    <div class="setRow"><span>مدة اليوم</span><select id="setDayLength"><option value="6">٦ دقائق</option><option value="12">١٢ دقيقة</option><option value="24">٢٤ دقيقة</option></select></div>
+    <div class="setRow"><span>الطقس</span><select id="setWeather"><option value="auto">متغيّر</option><option value="clear">صحو</option><option value="rain">مطر</option></select></div>
     <div class="setRow"><span>حساسية الماوس</span><input type="range" id="setSens" min="0.4" max="2.5" step="0.05" value="1"></div>
     <div class="setRow"><span>مجال الرؤية FOV</span><input type="range" id="setFov" min="55" max="95" step="1" value="66"></div>
     <div class="setRow"><span>مؤثرات صوتية</span><input type="range" id="setSfx" min="0" max="1" step="0.05" value="0.8"></div>
@@ -282,7 +290,7 @@ h1 { margin: 8px 0 4px; font-size: clamp(26px, 7vw, 34px); letter-spacing: -1px;
     <div class="kbdTable">
       <span>الحركة</span><b>W A S D</b>
       <span>النظر حولك (بعد قفل الماوس)</span><b>Mouse</b>
-      <span>قفز</span><b>Space</b>
+      <span>قفز</span><b>Space</b><span>الخريطة الكاملة</span><b>Tab</b><span>سحب خيط مثبت (بدون سحب تلقائي)</span><b>E ثم Shift</b>
       <span>تأرجح/سحب بالشبكة (مطوّل)</span><b>E / الزر الأيمن</b>
       <span>إطلاق شبكة على هدف</span><b>F / الزر الأيسر</b>
       <span>جري سريع</span><b>Shift</b>

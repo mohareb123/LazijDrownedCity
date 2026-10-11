@@ -1,10 +1,10 @@
+require('fs').mkdirSync(require('path').join(__dirname,'artifacts'),{recursive:true});
 const puppeteer=require('puppeteer'),fs=require('fs'),assert=require('assert');
-fs.mkdirSync('tests/artifacts',{recursive:true});
 (async()=>{
 const b=await puppeteer.launch({headless:true,args:['--no-sandbox','--enable-unsafe-swiftshader','--use-gl=angle','--use-angle=swiftshader','--disable-dev-shm-usage']});
 const page=await b.newPage();await page.setViewport({width:960,height:600});const errors=[];page.on('pageerror',e=>errors.push(e.message));
 await page.evaluateOnNewDocument(()=>{localStorage.setItem('lazij-open-settings',JSON.stringify({quality:'low'}));localStorage.setItem('lazij-open',JSON.stringify({v:3,avatar:'hero',pos:[45,0,45],mission:'find',flags:[],hp:5}));const raf=window.requestAnimationFrame;window.requestAnimationFrame=fn=>raf.call(window,t=>{if(!window.frozen)fn(t)});});
-await page.setRequestInterception(true);page.on('request',req=>{if(req.isNavigationRequest()){let s=fs.readFileSync('index.html','utf8').replace('</script>',`\nwindow.qa={player,creature,scene,camera,renderer,renderFrame,THREE,input,web,enemies,boss,startRun,updateAvatar,updateFx,updateFlecks,switchAvatar,cancelAction,beginAction,shootWeb,meleeAttack,damagePlayer,stepPlayer,attackOrigin,updateCityLOD,get hero(){return heroRoot},get action(){return heroAction},get pose(){return activePose},get age(){return actionAge},get timer(){return actionTimer},get serial(){return animationSerial},get shot(){return shootLine},get accents(){return spiderAccents},get avatar(){return avatar}};\n</script>`);req.respond({status:200,contentType:'text/html',body:s})}else req.continue()});
+await page.setRequestInterception(true);page.on('request',req=>{if(req.isNavigationRequest()){let s=fs.readFileSync(require('path').join(__dirname,'../index.html'),'utf8').replace('</script>',`\nwindow.qa={player,creature,scene,camera,renderer,renderFrame,THREE,input,web,enemies,boss,startRun,updateAvatar,updateFx,updateFlecks,switchAvatar,cancelAction,beginAction,shootWeb,meleeAttack,damagePlayer,stepPlayer,attackOrigin,updateCityLOD,get hero(){return heroRoot},get action(){return heroAction},get pose(){return activePose},get age(){return actionAge},get timer(){return actionTimer},get serial(){return animationSerial},get shot(){return shootLine},get accents(){return spiderAccents},get avatar(){return avatar}};\n</script>`);req.respond({status:200,contentType:'text/html',body:s})}else req.continue()});
 await page.goto('http://127.0.0.1:8080/',{waitUntil:'load'});await page.waitForFunction(()=>window.qa?.hero&&document.getElementById('assetStatus').textContent.startsWith('جاهز'),{timeout:90000});await page.evaluate(()=>qa.startRun(false));for(let i=0;i<3;i++)await page.evaluate(()=>document.getElementById('wNext').click());await page.evaluate(()=>window.frozen=true);await new Promise(r=>setTimeout(r,200));
 const result=await page.evaluate(()=>{
 const q=qa,out={};
@@ -25,6 +25,6 @@ setStreet();isolate();e=foe(6);q.shootWeb();q.updateAvatar(.17);out.spiderShot=!
 return out;
 });
 for(const [k,v]of Object.entries(result))if(typeof v==='boolean')assert(v,k);assert(result.handOriginError<.01);assert(result.spiderAccents>0);assert.equal(errors.length,0);
-fs.writeFileSync('tests/artifacts/animation-qa.json',JSON.stringify({result,errors},null,2));console.log(JSON.stringify({result,errors},null,2));
+fs.writeFileSync(require('path').join(__dirname,'artifacts')+'/animation-qa.json',JSON.stringify({result,errors},null,2));console.log(JSON.stringify({result,errors},null,2));
 await b.close();
 })().catch(e=>{console.error(e);process.exit(1)});
