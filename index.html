@@ -107,6 +107,7 @@ h1 { margin: 8px 0 4px; font-size: clamp(26px, 7vw, 34px); letter-spacing: -1px;
 #worldStatus{position:fixed;left:20px;top:88px;z-index:5;background:#dbe7efd9;color:#20354a;border-radius:15px;padding:10px 15px;font-size:12px;pointer-events:auto}#worldClock{font-size:17px;font-weight:bold;direction:ltr}#mapOpen{border:0;border-radius:8px;padding:7px;margin-top:7px;background:#bad5dd;color:#20354a;cursor:pointer}
 #worldMapPanel{position:fixed;inset:0;z-index:60;background:#091222e8;display:flex;align-items:center;justify-content:center}#worldMapPanel.hidden{display:none}.mapCard{background:#dbe7ef;border-radius:22px;padding:20px;max-width:85vw;text-align:center;color:#20354a}#worldMapCanvas{position:relative;inset:auto;margin:auto;width:min(68vh,70vw);height:min(68vh,70vw);border-radius:12px}#mapClose{padding:10px 20px;border:0;border-radius:10px;background:#aac9da;cursor:pointer}#worldMapInfo{font-size:12px;margin:10px 0}
 @media(max-width:700px){#worldStatus{top:115px;left:10px;padding:6px;font-size:10px}#worldClock{font-size:13px}}
+#combatPanel{position:fixed;z-index:5;bottom:180px;left:20px;background:#deebf0e8;color:#233d4e;border-radius:14px;padding:10px 14px;font-size:12px;max-width:300px;pointer-events:none}#combatStats{font-weight:700}#combatHint{font-size:11px;color:#536b7b}@media(max-width:700px){#combatPanel{bottom:170px;left:8px;max-width:220px;font-size:10px}}
 </style>
 </head>
 <body>
@@ -127,6 +128,7 @@ h1 { margin: 8px 0 4px; font-size: clamp(26px, 7vw, 34px); letter-spacing: -1px;
 <div id="bossWrap" class="hidden"><span>الملك الأسود</span><span id="bossPips">●●●</span></div>
 <div id="wToast"></div>
 <canvas id="minimap"></canvas>
+<div id="combatPanel"><div id="combatStats"></div><div id="combatObjective"></div><div id="combatHint"></div></div>
 <div id="worldStatus"><div id="worldClock"></div><div id="worldDistrict"></div><button id="mapOpen">Tab • خريطة المدينة</button></div>
 <div id="worldMapPanel" class="hidden"><div class="mapCard"><h2>المدينة • شمال ↑</h2><canvas id="worldMapCanvas" width="700" height="700"></canvas><div id="worldMapInfo"></div><button id="mapClose">Tab • العودة للّعب</button></div></div>
 <div id="senseVignette"></div>
@@ -182,7 +184,7 @@ h1 { margin: 8px 0 4px; font-size: clamp(26px, 7vw, 34px); letter-spacing: -1px;
     <div class="kbdTable">
       <span>الحركة</span><b>W A S D</b>
       <span>النظر حولك (بعد قفل الماوس)</span><b>Mouse</b>
-      <span>قفز</span><b>Space</b><span>الخريطة الكاملة</span><b>Tab</b><span>سحب خيط مثبت (بدون سحب تلقائي)</span><b>E ثم Shift</b>
+      <span>اندفاعة خيط في الهواء</span><b>X</b><span>بدء دورية عند العلامة الخضراء</span><b>N</b><span>قفز</span><b>Space</b><span>الخريطة الكاملة</span><b>Tab</b><span>سحب خيط مثبت (بدون سحب تلقائي)</span><b>E ثم Shift</b>
       <span>تأرجح/سحب بالشبكة (مطوّل)</span><b>E / الزر الأيمن</b>
       <span>إطلاق شبكة على هدف</span><b>F / الزر الأيسر</b>
       <span>جري سريع</span><b>Shift</b>
@@ -63605,7 +63607,8 @@ function stepPlayerTick(dt) {
   let dz = fz * input.forward + rz * input.strafe;
   const dl = Math.hypot(dx, dz);
   if (dl > 1) { dx /= dl; dz /= dl; }
-  if(p.onGround){
+  if(p.dodgeTime>0){p.dodgeTime=Math.max(0,p.dodgeTime-dt);p.vel.x=p.dodgeDir.x*14;p.vel.z=p.dodgeDir.z*14;}
+  else if(p.onGround){
     const target=input.sprint?11:7,accel=dl>.1?24:32;
     p.vel.x+=clamp(dx*target-p.vel.x,-accel*dt,accel*dt);
     p.vel.z+=clamp(dz*target-p.vel.z,-accel*dt,accel*dt);
@@ -63617,6 +63620,7 @@ function stepPlayerTick(dt) {
   if(wantJump){wantJump=false;if(p.onGround){p.vel.y=7;p.onGround=false;sfxJump();}}
   if(web.active){
     web.t=(web.t||0)+dt;
+    if(p.zipTime>0){p.zipTime=Math.max(0,p.zipTime-dt);p.vel.addScaledVector(web.anchor.clone().sub(p.pos).normalize(),30*dt);web.len=Math.max(5,web.len-18*dt);if(!p.zipTime||p.pos.distanceTo(web.anchor)<6)releaseWeb();}
     if(input.sprint)web.len=Math.max(5,web.len-4*dt);
   }
   const hs=Math.hypot(p.vel.x,p.vel.z);
@@ -63670,6 +63674,7 @@ function attachWeb() {
 function releaseWeb() {
   if (!web.active) return;
   web.active = false;
+  player.zipTime=0;
   player.webReleasing=.28;
   // Releasing preserves the current momentum; no free upward impulse.
   if (web.line) web.line.visible = false;
@@ -63798,12 +63803,16 @@ for (let i = 0; i < 20; i++) {
 function updateEnemies(dt) {
   let alive = 0;
   for (const e of enemies) {
+    if(e.healthBar)e.healthBar.visible=!!e.contract&&e.alive;
     if (!e.alive) continue;
     alive++;
+    e.stun=Math.max(0,(e.stun||0)-dt);e.attackCd=Math.max(0,(e.attackCd||0)-dt);
+    const wasWindup=(e.windup||0)>0;e.windup=Math.max(0,(e.windup||0)-dt);
     const ddx = player.pos.x - e.pos.x, ddz = player.pos.z - e.pos.z;
     const ddy = player.pos.y - e.pos.y;
     const dist = Math.hypot(ddx, ddz);
     e.aggro = dist < 19 && Math.abs(ddy) < 5;
+    if(!wasWindup&&!e.stun&&!e.attackCd&&dist<2.5&&Math.abs(ddy)<1.7&&sightClear(city,e.pos.clone().add(new THREE.Vector3(0,1,0)),player.pos.clone().add(new THREE.Vector3(0,1,0))))e.windup=.72;
     let vx, vz;
     if (e.aggro) {
       vx = ddx / (dist || 1) * 6.6;
@@ -63814,6 +63823,7 @@ function updateEnemies(dt) {
       const tl = Math.hypot(tx, tz) || 1;
       vx = tx / tl * 3.1; vz = tz / tl * 3.1;
     }
+    if(e.stun>0||e.windup>0||wasWindup){vx=0;vz=0;}
     e.pos.x += vx * dt;
     e.pos.z += vz * dt;
     collidePush(city,e.pos,.55);
@@ -63821,26 +63831,23 @@ function updateEnemies(dt) {
     e.mesh.position.copy(e.pos);
     e.mesh.rotation.y = Math.atan2(-vx, -vz);
     if (e.mix) {
-      setRobotClip(e, e.aggro ? "Running" : "Walking");
-      e.mix.timeScale = clamp(.7 + Math.hypot(vx, vz) * .09, .7, 1.7);
+      const punching=e.windup>0&&e.acts?.Punch;
+      setRobotClip(e,punching?'Punch':e.stun>0?'Idle':e.aggro?'Running':'Walking');
+      e.mix.timeScale=punching?robotClips.Punch.duration/.72:clamp(.7+Math.hypot(vx,vz)*.09,.7,1.7);
       e.mix.update(dt);
     } else {
       e.mesh.position.y += Math.abs(Math.sin(performance.now() * .009 + e.pos.x)) * .06;
     }
-    // contact
-    if (dist < 1.25 && Math.abs(ddy) < 1.6 && invuln <= 0) {
-      invuln = 1.8;
-      const kd = tmpA.set(ddx, 0, ddz).normalize().multiplyScalar(-1);
-      player.vel.x = kd.x * 13;
-      player.vel.z = kd.z * 13;
-      player.vel.y = 5.5;
-      player.onGround = false;
-      fxSlow = .45; fxCamShake = .3;
-      releaseWeb();
-      damagePlayer(1);
-      toast("مطارد سنبيوتي مزّق ظهرك! اضربه بـ F أو 🕸");
+    enemyWarning(e,e.windup>0&&!e.stun);
+    if(e.healthBar)e.healthBar.position.copy(e.pos).add(new THREE.Vector3(0,2.6,0));
+    if(wasWindup && e.windup<=0 && !e.stun){
+      e.attackCd=1.25;
+      if(dist<2.7&&Math.abs(ddy)<1.7&&invuln<=0&&sightClear(city,e.pos.clone().add(new THREE.Vector3(0,1,0)),player.pos.clone().add(new THREE.Vector3(0,1,0)))){
+        invuln=1;player.vel.set(ddx/(dist||1)*6,2,ddz/(dist||1)*6);player.onGround=false;
+        fxCamShake=.2;damagePlayer(1);
+      }
     }
-    if (dist > 130) {
+    if (dist > 130 && !e.contract) {
       const w = streetSpotAround(player.pos.x, player.pos.z, 55, 90);
       e.pos.set(w.x, w.y, w.z);
       e.alive = true;
@@ -63871,6 +63878,8 @@ function resolveWebShot() {
   }
   const best=shotTarget!==boss && shotTarget?.alive && shotTarget.pos.distanceTo(player.pos)<34 && sightClear(city,player.pos.clone().add(new THREE.Vector3(0,1,0)),shotTarget.pos.clone().add(new THREE.Vector3(0,1,0))) ? shotTarget : null;
   if (best) {
+    if(best.contract&&stunGuard(best,1)){spawnShotLine(attackOrigin(),best.pos.clone().add(new THREE.Vector3(0,1,0)));return;}
+    enemyWarning(best,false);
     best.alive = false;
     best.mesh.visible = false;
     tmpA.copy(attackOrigin());
@@ -64133,7 +64142,9 @@ window.addEventListener("keydown", e => {
   if (paused || uiBusy || worldMapOpen) return;
   if (e.code === "KeyQ") { input.climb=true; e.preventDefault(); }
   if (e.code === "KeyC" && !e.repeat) { switchAvatar(); return; }
-  if (e.code === "KeyR" && !e.repeat && player.onGround && actionTimer<=0) { beginAction('roll',.9); invuln=Math.max(invuln,.4); player.vel.addScaledVector(fwdVec,5); return; }
+  if(e.code==='KeyR'&&!e.repeat){dodge();return;}
+  if(e.code==='KeyX'&&!e.repeat){startWebBurst();return;}
+  if(e.code==='KeyN'&&!e.repeat){startPatrol();return;}
   if (e.code === "KeyT" && !e.repeat) { beginAction('dance',3); return; }
   if (e.code === "KeyJ" && !e.repeat) { meleeAttack(); return; }
   if (e.code === "KeyW" || e.code === "ArrowUp") keys.up = true;
@@ -64489,14 +64500,14 @@ function saveAll() {
       mission,
       hp, score, raceBest, avatar, bossHp:boss.active?boss.hp:0,
       pos: [player.pos.x, player.pos.y, player.pos.z],
-      worldHour,weatherClock,v: 4
+      worldHour,weatherClock,progress:{xp:combat.xp,completed:combat.completed},v: 5
     }));
   } catch {}
 }
 function loadAll() {
   let data = null;
   try { data = JSON.parse(localStorage.getItem("lazij-open") || "null"); } catch {}
-  if (!data || ![1,2,3,4].includes(data.v)) return false;
+  if (!data || ![1,2,3,4,5].includes(data.v)) return false;
   for (let i = 0; i < Math.min(parts.length, (data.flags || []).length); i++) {
     if (data.flags[i]) {
       parts[i].taken = true;
@@ -64510,6 +64521,8 @@ function loadAll() {
   avatar=data.avatar==='hero'?'hero':'spider';
   if(Number.isFinite(data.worldHour))worldHour=((data.worldHour%24)+24)%24;
   weatherClock=Math.max(0,Number(data.weatherClock)||0);
+  combat.xp=Math.max(0,Number(data.progress?.xp)||0);
+  combat.completed=Array.isArray(data.progress?.completed)?data.progress.completed.filter(id=>patrolSites.some(s=>s.id===id)):[];
   hp = clamp(Number(data.hp)||5,1,5); score = Math.max(0,Number(data.score)||0); raceBest = Math.max(0, Number(data.raceBest)||0);
   if (mission === "boss") {summonBoss();boss.hp=clamp(Number(data.bossHp)||3,1,3);renderBossPips();}
   return true;
@@ -64530,6 +64543,8 @@ let robotTmpl = null, robotClips = {}, bossTmpl = null, bossClips = {}, skyline 
 let worldHour=16,weatherClock=0,weatherWet=0,trafficClock=0;
 const cars=[],trafficRoutes=[],streetLights=[];
 let worldMapOpen=false;
+const combat={focus:100,xp:0,completed:[],patrol:null,chain:0,chainClock:0,queue:false,zipCd:0,dodgeCd:0};
+const patrolSites=[{id:'center',name:'دورية وسط المدينة',x:45,z:165},{id:'west',name:'دورية حي الأعمال',x:-585,z:435},{id:'suburb',name:'دورية الضواحي',x:1005,z:1005}];
 const resumed = loadAll();
 
 // ——————————————————— main loop ———————————————————
@@ -64565,7 +64580,8 @@ function animate(now) {
   const dt = rawDt * fxSlow;
   stepPlayer(dt);
   handleCarContact();
-  if (invuln <= 0) updateEnemies(dt);
+  updateEnemies(dt);
+  updateCombat(dt);
   if (boss.active) updateBoss(dt);
   tryCollect(dt);
   updateFx(dt);
@@ -64674,7 +64690,10 @@ function attachRobot(e) {
     tintSkins(clone, true);
     const wrap = new THREE.Group();
     clone.rotation.y = Math.PI;
-    clone.scale.setScalar(.92);
+    const measure=new THREE.AnimationMixer(clone);
+    if(robotClips.Idle)measure.clipAction(robotClips.Idle).play();measure.update(0);clone.updateMatrixWorld(true);
+    const bounds=new THREE.Box3().setFromObject(clone,true),height=bounds.max.y-bounds.min.y;measure.stopAllAction();
+    const enemyScale=2.2/Math.max(.1,height);clone.scale.setScalar(enemyScale);clone.position.y=-bounds.min.y*enemyScale;
     wrap.add(clone);
     if (e.mesh) { scene.remove(e.mesh); }
     e.mesh = wrap;
@@ -64682,7 +64701,7 @@ function attachRobot(e) {
     scene.add(wrap);
     e.mix = new THREE.AnimationMixer(clone);
     e.acts = {};
-    for (const name of ["Idle", "Walking", "Running", "Death"]) {
+    for (const name of ["Idle", "Walking", "Running", "Death", "Punch"]) {
       if (robotClips[name]) { const a = e.mix.clipAction(robotClips[name]); a.enabled = false; a.setLoop(THREE.LoopRepeat, Infinity); e.acts[name] = a; }
     }
     if (e.acts.Idle) { e.acts.Idle.enabled = true; e.acts.Idle.play(); e.robotClip = "Idle"; }
@@ -64924,6 +64943,7 @@ function chooseShotTarget() {
   else shotAim.copy(player.pos).addScaledVector(forward,12).add(new THREE.Vector3(0,1.25,0));
 }
 function meleeAttack() {
+  if(actionTimer>0&&['punchL','punchR'].includes(actionKind)&&actionAge>.28){combat.queue=true;return;}
   if(uiBusy||paused||player.climbing||actionTimer>0 && ['punchL','punchR','shoot','hit','recover'].includes(actionKind))return;
   meleeSide=1-meleeSide;
   beginAction(meleeSide?'punchR':'punchL',.62,.23,resolveMeleeHit);
@@ -64937,6 +64957,9 @@ function resolveMeleeHit() {
   }
   if(boss.active && player.pos.y>TOWER_H-3 && player.pos.distanceTo(boss.pos)<4) {hitBoss();return;}
   if(!victim) {tone(160,80,.08,'sine',.05);return;}
+  combat.chain=combat.chain%3+1;combat.chainClock=1.5;
+  if(victim.contract&&stunGuard(victim,combat.chain===3?2:1))return;
+  enemyWarning(victim,false);
   victim.alive=false;victim.robotClip='';
   if(victim.mix && robotClips.Death) {
     victim.mix.stopAllAction();
@@ -65257,8 +65280,95 @@ function drawWorldMap() {
   for(const l of city.lots)if(l.park){c.fillStyle='#416c53';c.fillRect((l.x-11)*k,(l.z-11)*k,22*k,22*k);}
   for(const b of city.buildings){c.fillStyle=b.tower?'#f7cd66':b.h>70?'#68abb9':'#536478';c.fillRect((b.x-b.w/2)*k,(b.z-b.d/2)*k,Math.max(2,b.w*k),Math.max(2,b.d*k));}
   for(const p of parts)if(!p.taken){c.fillStyle='#ffe493';c.beginPath();c.arc(p.mesh.position.x*k,p.mesh.position.z*k,4,0,7);c.fill();}
+  for(const site of patrolSites){c.fillStyle=combat.completed.includes(site.id)?'#617b78':'#78e0c6';c.fillRect(site.x*k-4,site.z*k-4,8,8);}
   c.fillStyle='#ff7c87';c.beginPath();c.arc(player.pos.x*k,player.pos.z*k,6,0,7);c.fill();c.strokeStyle='white';c.stroke();
   c.restore();$('worldMapInfo').textContent=`${(WORLD_LIMIT*2/1000).toFixed(2)} × ${(WORLD_LIMIT*2/1000).toFixed(2)} كم • ${city.buildings.length} مبنى • ${cars.length} سيارة مرور • اللون الذهبي: أهداف المهمة`;
+}
+
+// v1.7 playable progression slice: real-anchor burst, readable combat, three patrols.
+function startWebBurst(){
+  if(paused||uiBusy||player.onGround||combat.zipCd>0||combat.focus<25)return;
+  if(!web.active)attachWeb();if(!web.active)return;
+  combat.focus-=25;combat.zipCd=3;player.zipTime=.95;
+  toast('اندفاعة خيط — اتجاه الواجهة الحقيقية، بدون انتقال فوري');
+}
+function dodge(){
+  if(paused||uiBusy||!player.onGround||combat.dodgeCd>0||combat.focus<12)return;
+  const dx=-Math.sin(camYaw)*input.forward+Math.cos(camYaw)*input.strafe;
+  const dz=-Math.cos(camYaw)*input.forward-Math.sin(camYaw)*input.strafe;
+  player.dodgeDir=new THREE.Vector3(dx,0,dz);
+  if(player.dodgeDir.lengthSq()<.1)player.dodgeDir.set(Math.sin(player.heading),0,Math.cos(player.heading));
+  player.dodgeDir.normalize();player.dodgeTime=.30;
+  combat.focus-=12;combat.dodgeCd=.85;combat.queue=false;
+  cancelAction();beginAction('roll',.5);invuln=Math.max(invuln,.28);
+}
+function nearestPatrol(){return patrolSites.filter(s=>!combat.completed.includes(s.id)).sort((a,b)=>Math.hypot(a.x-player.pos.x,a.z-player.pos.z)-Math.hypot(b.x-player.pos.x,b.z-player.pos.z))[0];}
+function startPatrol(){
+  if(paused||uiBusy||combat.patrol)return;
+  const site=nearestPatrol();if(!site){toast('حررت الدوريات الثلاث!');return;}
+  const d=Math.hypot(site.x-player.pos.x,site.z-player.pos.z);
+  if(d>35||player.pos.y>3){toast(`${site.name}: اقترب من علامة الشارع — ${Math.round(d)}م`);return;}
+  combat.patrol={id:site.id,wave:1,between:0};spawnPatrolWave(site);toast('دورية الحي: موجتان. الدائرة البرتقالية تحذّر من الضربة؛ R للمراوغة.');
+}
+function spawnPatrolWave(site){
+  for(let i=0;i<3;i++){
+    const e=enemies[i];if(e.cocoon){scene.remove(e.cocoon);e.cocoon=null;}
+    e.contract=site.id;e.hp=3;e.alive=true;e.mesh.visible=true;e.stun=.6;e.windup=0;e.attackCd=.8+i*.35;e.reactionTime=0;e.robotClip='';
+    if(e.mix)e.mix.stopAllAction();
+    e.pos.set(site.x+[4,-4,0][i],0,site.z+[0,4,-5][i]);collidePush(city,e.pos,.55);e.mesh.position.copy(e.pos);e.target.copy(e.pos);guardHealthBar(e);
+  }
+}
+function stunGuard(e,amount){
+  e.hp=Math.max(0,(e.hp||3)-amount);e.stun=.6;e.windup=0;e.attackCd=1;
+  if(e.warning)e.warning.visible=false;
+  burst(e.pos.x,e.pos.y+1,e.pos.z,5,eyeMaterial);
+  guardHealthBar(e);combat.hitText=`حارس: ${e.hp}/3 • ${combat.chain===3?'ضربة ختامية':'تابع الهجوم أو راوغ'}`;combat.hitTextTime=1.2;
+  if(e.hp>0)return true;
+  return false;
+}
+function guardHealthBar(e){
+  if(!e.healthBar){const c=document.createElement('canvas');c.width=96;c.height=16;e.healthCanvas=c;const tex=new THREE.CanvasTexture(c);e.healthBar=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,depthTest:true}));e.healthBar.scale.set(1.1,.18,1);scene.add(e.healthBar);}
+  const c=e.healthCanvas.getContext('2d');c.clearRect(0,0,96,16);
+  for(let i=0;i<3;i++){c.fillStyle=i<e.hp?'#8feac7':'#354658';c.fillRect(i*32+2,2,28,12);}
+  e.healthBar.material.map.needsUpdate=true;e.healthBar.visible=e.hp>0;e.healthBar.position.copy(e.pos).add(new THREE.Vector3(0,2.6,0));
+}
+function enemyWarning(e,on){
+  if(on&&!e.warning){e.warning=new THREE.Mesh(new THREE.RingGeometry(.8,1,24).rotateX(-Math.PI/2),new THREE.MeshBasicMaterial({color:0xff9a45,transparent:true,opacity:.85,side:THREE.DoubleSide,depthWrite:false}));scene.add(e.warning);}
+  if(e.warning){e.warning.visible=on;e.warning.position.copy(e.pos);e.warning.position.y+=.045;e.warning.scale.setScalar(1+(1-Math.max(0,e.windup)/.72)*1.4);}
+}
+function updateCombat(dt){
+  combat.zipCd=Math.max(0,combat.zipCd-dt);combat.dodgeCd=Math.max(0,combat.dodgeCd-dt);
+  const level=combat.xp>=500?3:combat.xp>=250?2:1,maxFocus=100+(level-1)*25;
+  combat.focus=Math.min(maxFocus,combat.focus+dt*(player.zipTime>0?0:9));
+  combat.chainClock=Math.max(0,combat.chainClock-dt);if(!combat.chainClock)combat.chain=0;
+  if(combat.queue&&actionTimer<=0){combat.queue=false;meleeAttack();}
+  let objective='';
+  const task=combat.patrol;
+  if(task){
+    const site=patrolSites.find(s=>s.id===task.id),left=enemies.filter(e=>e.contract===task.id&&e.alive).length;
+    if(Math.hypot(player.pos.x-site.x,player.pos.z-site.z)>95){endPatrol(false);toast('ابتعدت عن الدورية؛ يمكنك إعادة المحاولة عند علامتها.');}
+    else if(left===0){
+      task.between+=dt;
+      if(task.between>1.5){if(task.wave===1){task.wave=2;task.between=0;spawnPatrolWave(site);toast('الموجة الثانية وصلت');}else{endPatrol(true);}}
+    }
+    objective=`${site.name} • الموجة ${task.wave}/2 • ${left} حراس متبقين`;
+  }else{const site=nearestPatrol();objective=site?`${site.name} • ${Math.round(Math.hypot(site.x-player.pos.x,site.z-player.pos.z))}م • N للبدء`:'الدوريات الثلاث محررة ✓';}
+  $('combatStats').textContent=`مستوى ${level} • خبرة ${combat.xp} • تركيز ${Math.floor(combat.focus)}/${maxFocus}`;
+  $('combatObjective').textContent=objective;
+  combat.hitTextTime=Math.max(0,(combat.hitTextTime||0)-dt);
+  $('combatHint').textContent=combat.hitTextTime>0?combat.hitText:`J هجوم متسلسل${combat.chain?' '+combat.chain+'/3':''} • R مراوغة • X اندفاعة في الهواء`;
+  for(const site of patrolSites){if(!site.marker)continue;site.marker.visible=!combat.completed.includes(site.id);site.marker.rotation.y+=dt*.4;}
+}
+function endPatrol(success){
+  if(!combat.patrol)return;
+  const id=combat.patrol.id;
+  for(const e of enemies)if(e.contract===id){e.alive=false;e.mesh.visible=false;e.contract=null;e.hp=1;if(e.healthBar)e.healthBar.visible=false;enemyWarning(e,false);}
+  combat.patrol=null;
+  if(success&&!combat.completed.includes(id)){combat.completed.push(id);combat.xp+=250;score+=350;hp=Math.min(5,hp+2);renderHp();renderScore();toast('الدورية تحررت! +250 خبرة، +350 نقطة، واستعادة قلبين.');}
+  saveAll();
+}
+function initPatrols(){
+  for(const site of patrolSites){const m=new THREE.Mesh(new THREE.TorusGeometry(2,.10,6,32).rotateX(-Math.PI/2),new THREE.MeshBasicMaterial({color:0x78e0c6}));m.position.set(site.x,.08,site.z);site.marker=m;scene.add(m);}
 }
 
 // ═══════════════ PC GAME LAYER — states, menu, settings, audio, health, races, gamepad ═══════════════
@@ -65392,6 +65502,7 @@ function renderHp() { $("wHp").textContent = "❤".repeat(hp) + "🖤".repeat(5 
 function renderScore() { $("wScore").textContent = Math.round(score); }
 function healPlayer(n) { hp = Math.min(5, hp + n); renderHp(); }
 function knockDown() {
+  endPatrol(false);player.dodgeTime=0;player.zipTime=0;combat.queue=false;
   beginAction('recover',.95);
   releaseWeb();
   let best = city.lots[0], bd = 1e9;
@@ -65411,6 +65522,7 @@ function knockDown() {
   toast("سقط لَزِج… نهض في نقطة آمنة — البقاء في الأمان يشفيك تدريجيًا");
 }
 function damagePlayer(n) {
+  combat.chain=0;combat.chainClock=0;combat.queue=false;player.dodgeTime=0;
   beginAction('hit',.45);
   hp = Math.max(0, hp - n);
   renderHp();
@@ -65606,6 +65718,8 @@ function onPlayResumed() {
   }
 }
 function resetRun() {
+  endPatrol(false);Object.assign(combat,{focus:100,xp:0,completed:[],patrol:null,chain:0,chainClock:0,queue:false,zipCd:0,dodgeCd:0});player.dodgeTime=0;player.zipTime=0;
+  for(const e of enemies){e.hp=1;e.contract=null;e.windup=0;e.stun=0;e.attackCd=0;enemyWarning(e,false);}
   cancelAction();lastGrounded=false;player.webCasting=0;player.webReleasing=0;
   for (let i = 0; i < parts.length; i++) {
     parts[i].taken = false;
@@ -65718,6 +65832,7 @@ $("wPause").classList.add("hidden");
 document.addEventListener("pointerdown", () => { if (mode === "play") initAudio(); }, { once: true });
 $('avatarSwitch').onclick = switchAvatar;
 initLivingWorld();
+initPatrols();
 requestAnimationFrame(animate);
 importModels();
 

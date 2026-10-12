@@ -52,9 +52,13 @@
         57.4999999999998,
         0
       ],
-      "worldHour": 16.016700000000004,
-      "weatherClock": 0.501,
-      "v": 4
+      "worldHour": 16.010033333333336,
+      "weatherClock": 0.30100000000000005,
+      "progress": {
+        "xp": 0,
+        "completed": []
+      },
+      "v": 5
     }
   },
   "states": [

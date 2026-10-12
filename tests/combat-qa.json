@@ -1,0 +1,29 @@
+{
+  "result": {
+    "startRequiresProximity": true,
+    "patrolStarts": true,
+    "guardHits": [
+      2,
+      1,
+      0
+    ],
+    "threeHitFinisher": true,
+    "attackTelegraph": true,
+    "noInstantDamage": true,
+    "dodgeCooldown": true,
+    "dodgeDisplacement": true,
+    "dodgeAvoidsStrike": true,
+    "telegraphedHitLands": true,
+    "burstRequiresRealAnchor": true,
+    "burstMovesContinuously": true,
+    "burstCooldown": true,
+    "secondWave": true,
+    "rewardAndCompletion": true,
+    "noDuplicateReward": true,
+    "levelCapacity": true,
+    "progressPersists": true,
+    "newGameClearsProgress": true,
+    "leavingAbortsWithoutReward": true
+  },
+  "errors": []
+}

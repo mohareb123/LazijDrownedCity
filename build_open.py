@@ -215,6 +215,7 @@ h1 { margin: 8px 0 4px; font-size: clamp(26px, 7vw, 34px); letter-spacing: -1px;
 #worldStatus{position:fixed;left:20px;top:88px;z-index:5;background:#dbe7efd9;color:#20354a;border-radius:15px;padding:10px 15px;font-size:12px;pointer-events:auto}#worldClock{font-size:17px;font-weight:bold;direction:ltr}#mapOpen{border:0;border-radius:8px;padding:7px;margin-top:7px;background:#bad5dd;color:#20354a;cursor:pointer}
 #worldMapPanel{position:fixed;inset:0;z-index:60;background:#091222e8;display:flex;align-items:center;justify-content:center}#worldMapPanel.hidden{display:none}.mapCard{background:#dbe7ef;border-radius:22px;padding:20px;max-width:85vw;text-align:center;color:#20354a}#worldMapCanvas{position:relative;inset:auto;margin:auto;width:min(68vh,70vw);height:min(68vh,70vw);border-radius:12px}#mapClose{padding:10px 20px;border:0;border-radius:10px;background:#aac9da;cursor:pointer}#worldMapInfo{font-size:12px;margin:10px 0}
 @media(max-width:700px){#worldStatus{top:115px;left:10px;padding:6px;font-size:10px}#worldClock{font-size:13px}}
+#combatPanel{position:fixed;z-index:5;bottom:180px;left:20px;background:#deebf0e8;color:#233d4e;border-radius:14px;padding:10px 14px;font-size:12px;max-width:300px;pointer-events:none}#combatStats{font-weight:700}#combatHint{font-size:11px;color:#536b7b}@media(max-width:700px){#combatPanel{bottom:170px;left:8px;max-width:220px;font-size:10px}}
 </style>
 </head>
 <body>
@@ -235,6 +236,7 @@ h1 { margin: 8px 0 4px; font-size: clamp(26px, 7vw, 34px); letter-spacing: -1px;
 <div id="bossWrap" class="hidden"><span>الملك الأسود</span><span id="bossPips">●●●</span></div>
 <div id="wToast"></div>
 <canvas id="minimap"></canvas>
+<div id="combatPanel"><div id="combatStats"></div><div id="combatObjective"></div><div id="combatHint"></div></div>
 <div id="worldStatus"><div id="worldClock"></div><div id="worldDistrict"></div><button id="mapOpen">Tab • خريطة المدينة</button></div>
 <div id="worldMapPanel" class="hidden"><div class="mapCard"><h2>المدينة • شمال ↑</h2><canvas id="worldMapCanvas" width="700" height="700"></canvas><div id="worldMapInfo"></div><button id="mapClose">Tab • العودة للّعب</button></div></div>
 <div id="senseVignette"></div>
@@ -290,7 +292,7 @@ h1 { margin: 8px 0 4px; font-size: clamp(26px, 7vw, 34px); letter-spacing: -1px;
     <div class="kbdTable">
       <span>الحركة</span><b>W A S D</b>
       <span>النظر حولك (بعد قفل الماوس)</span><b>Mouse</b>
-      <span>قفز</span><b>Space</b><span>الخريطة الكاملة</span><b>Tab</b><span>سحب خيط مثبت (بدون سحب تلقائي)</span><b>E ثم Shift</b>
+      <span>اندفاعة خيط في الهواء</span><b>X</b><span>بدء دورية عند العلامة الخضراء</span><b>N</b><span>قفز</span><b>Space</b><span>الخريطة الكاملة</span><b>Tab</b><span>سحب خيط مثبت (بدون سحب تلقائي)</span><b>E ثم Shift</b>
       <span>تأرجح/سحب بالشبكة (مطوّل)</span><b>E / الزر الأيمن</b>
       <span>إطلاق شبكة على هدف</span><b>F / الزر الأيسر</b>
       <span>جري سريع</span><b>Shift</b>
