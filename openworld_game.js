@@ -1725,6 +1725,7 @@ function switchAvatar() {
 }
 // Animation events own their timing. Effects fire at the release/contact frame.
 function cancelAction() {
+  combat.queue=false;
   actionTimer=0;actionDuration=0;actionAge=0;actionImpact=-1;actionCallback=null;
 }
 function beginAction(kind,duration,impact=-1,callback=null) {

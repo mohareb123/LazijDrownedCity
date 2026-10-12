@@ -1,5 +1,6 @@
 {
   "result": {
+    "cancelClearsBufferedAttack": true,
     "startRequiresProximity": true,
     "patrolStarts": true,
     "guardHits": [

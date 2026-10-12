@@ -9,6 +9,7 @@ await page.goto('http://127.0.0.1:8080/',{waitUntil:'load'});await page.waitForF
 
 const result=await page.evaluate(()=>{
 const q=qa,r={};function street(){q.cancelAction();q.input.forward=0;q.input.strafe=0;q.input.climb=false;q.web.active=false;q.player.pos.set(45,0,165);q.player.heading=0;q.player.vel.set(0,0,0);q.player.onGround=true;q.creature.position.copy(q.player.pos);q.creature.rotation.set(0,0,0);q.updateAvatar(.8);q.combat.focus=100;q.combat.dodgeCd=0;q.combat.zipCd=0;q.invuln=0;}
+q.combat.queue=true;q.cancelAction();r.cancelClearsBufferedAttack=!q.combat.queue;
 q.resetRun();street();q.player.pos.x=1000;q.startPatrol();r.startRequiresProximity=!q.combat.patrol;street();q.startPatrol();r.patrolStarts=q.combat.patrol?.wave===1&&q.enemies.slice(0,3).every(e=>e.hp===3&&e.alive);
 q.enemies.forEach((e,i)=>{if(i>0){e.pos.set(500+i*5,0,500);e.mesh.position.copy(e.pos);}});
 const e=q.enemies[0];e.pos.set(45,0,162.8);e.mesh.position.copy(e.pos);const hits=[];
